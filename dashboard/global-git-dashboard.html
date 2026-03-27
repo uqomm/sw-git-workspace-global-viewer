@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Git Workspace Global Viewer</title>
+    <style>
+        :root {
+            --bg: #f6f7f9;
+            --surface: #ffffff;
+            --ink: #1a1f2c;
+            --muted: #5b667a;
+            --ok: #2f8f4e;
+            --warn: #d27a00;
+            --bad: #b42318;
+            --line: #dbe1ea;
+            --shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: radial-gradient(circle at 15% -10%, #e3f2fd, transparent 30%),
+                                    radial-gradient(circle at 90% -5%, #ffe8c7, transparent 25%),
+                                    var(--bg);
+            color: var(--ink);
+        }
+
+        .wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            box-shadow: var(--shadow);
+            border-radius: 14px;
+            padding: 16px 18px;
+        }
+        h1 { margin: 0 0 6px; font-size: 1.5rem; }
+        .meta { color: var(--muted); font-size: 0.92rem; }
+
+        .kpis {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(130px, 1fr));
+            gap: 10px;
+        }
+        .kpi {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }
+        .kpi .n { font-size: 1.4rem; font-weight: 700; }
+        .kpi .l { color: var(--muted); font-size: 0.82rem; }
+
+        .toolbar {
+            margin-top: 14px;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+            align-items: center;
+        }
+        .toolbar input[type="search"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            font-size: 0.95rem;
+        }
+        .checks { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 0.9rem; }
+
+        .table-wrap {
+            margin-top: 14px;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: auto;
+            box-shadow: var(--shadow);
+        }
+        table { width: 100%; border-collapse: collapse; min-width: 1050px; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #edf1f7; vertical-align: top; }
+        th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #f1f4f9;
+            font-size: 0.84rem;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            color: #344054;
+            cursor: pointer;
+            user-select: none;
+        }
+        tr:hover td { background: #f9fbff; }
+
+        .badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 0.75rem;
+            border: 1px solid var(--line);
+            background: #fff;
+            color: var(--muted);
+        }
+        .state-ok { color: var(--ok); border-color: #b2dfc0; background: #effbf3; }
+        .state-warn { color: var(--warn); border-color: #f6d39d; background: #fff8eb; }
+        .state-bad { color: var(--bad); border-color: #f2b3ad; background: #fff2f1; }
+
+        .footer { margin: 12px 0 4px; color: var(--muted); font-size: 0.82rem; }
+
+        @media (max-width: 880px) {
+            .kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+            .toolbar { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <section class="header">
+            <h1>Git Workspace Global Viewer (Read-Only)</h1>
+            <div class="meta">Workspace: C:\Users\artur\development | Profundidad: 3 | Generado: 2026-03-27 11:00:38</div>
+            <div class="kpis">
+                <div class="kpi"><div class="n">34</div><div class="l">Repos detectados</div></div>
+                <div class="kpi"><div class="n">18</div><div class="l">Con cambios locales</div></div>
+                <div class="kpi"><div class="n">4</div><div class="l">Detached HEAD</div></div>
+                <div class="kpi"><div class="n">20</div><div class="l">Potencialmente desactualizados</div></div>
+            </div>
+        </section>
+
+        <section class="toolbar">
+            <input id="search" type="search" placeholder="Buscar repo, rama, commit o estado..." />
+            <div class="checks">
+                <label><input id="f-dirty" type="checkbox" /> Solo con cambios</label>
+                <label><input id="f-detached" type="checkbox" /> Solo detached</label>
+                <label><input id="f-stale" type="checkbox" /> Solo desactualizados</label>
+            </div>
+        </section>
+
+        <section class="table-wrap">
+            <table id="repos-table">
+                <thead>
+                    <tr>
+                        <th data-key="name">Repositorio</th>
+                        <th data-key="branch">Rama Actual</th>
+                        <th data-key="sync_remote">Sync Remoto</th>
+                        <th data-key="local_changes">Cambios Locales</th>
+                        <th data-key="last_commit">Ultimo Commit</th>
+                        <th data-key="flags">Alertas</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <div class="footer">Modo solo lectura: no se ejecutan operaciones mutantes de Git.</div>
+    </div>
+
+    <script>
+        const rows = [{"name": "_recovery/orphan-modules-20260320-2/director", "branch": "DETACHED (a6f0a08)", "sync_remote": "No upstream", "local_changes": "🔴 M:2", "last_commit": "a6f0a08 - Thomas Gelf (2 years, 6 months ago): WIP: doc, module.info: prepare v1.11.0", "has_changes": true, "is_detached": true, "is_stale": true}, {"name": "_recovery/orphan-modules-20260320-2/incubator", "branch": "DETACHED (45d1eb8)", "sync_remote": "No upstream", "local_changes": "🟢 Limpio", "last_commit": "45d1eb8 - Thomas Gelf (3 years, 2 months ago): Version v0.20.0", "has_changes": false, "is_detached": true, "is_stale": true}, {"name": "_recovery/orphan-modules-20260320-2/ipl", "branch": "DETACHED (dd3e987)", "sync_remote": "No upstream", "local_changes": "🟢 Limpio", "last_commit": "dd3e987 - Eric Lippmann (6 years ago): Add assets", "has_changes": false, "is_detached": true, "is_stale": true}, {"name": "_recovery/orphan-modules-20260320-2/reactbundle", "branch": "DETACHED (30b5d1c)", "sync_remote": "No upstream", "local_changes": "🟢 Limpio", "last_commit": "30b5d1c - Johannes Meyer (5 years ago): Version 0.9.0", "has_changes": false, "is_detached": true, "is_stale": true}, {"name": "desicion-maker", "branch": "improve-computer-decision", "sync_remote": "Up to date", "local_changes": "🔴 M:1 🟡 U:17", "last_commit": "21c4f2d - Arturo Veras (3 months ago): feat: agregar análisis de refactoring CommandMessage", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "legacy/gateway/fw-gateway1Lora", "branch": "development", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "a48c063 - Arturo Veras (4 months ago): docs: Remove obsolete documentation files for Logger, UART changes, and GUI manual", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "legacy/sigmatag", "branch": "development", "sync_remote": "Ahead 1", "local_changes": "🟢 Limpio", "last_commit": "6832c5f - arturo33 (2 years, 8 months ago): add uqomm theme and remove internet libraries", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/drs/sw-drsmonitoring", "branch": "drs-installer", "sync_remote": "Up to date", "local_changes": "🔴 M:2 🟡 U:2", "last_commit": "cec5a5ac - Arturo Veras (12 minutes ago): feat(installer): migrate apply flow to python and remove shell delegate", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "products/drs/sw-DrsValidator", "branch": "development", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "bb2918f - Arturo Veras (2 months ago): feat: Add pyproject.toml with UV dependency management", "has_changes": false, "is_detached": false, "is_stale": false}, {"name": "products/leaky-feeder/fw-gateway2Lora", "branch": "feature/fsk-reader-becker-varis", "sync_remote": "Up to date", "local_changes": "🔴 M:2 🟡 U:3", "last_commit": "9b6a3e5 - Arturo Veras (2 hours ago): feat(firmware): add spi_transductor project (STM32L476)", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "products/leaky-feeder/fw-headend", "branch": "development", "sync_remote": "Up to date", "local_changes": "🔴 M:1", "last_commit": "54928b1 - aquiles (24 hours ago): fix(firmware): Removed the red display on low RF power measures", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "products/leaky-feeder/fw-headend-rtos", "branch": "main", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "f7b5f69 - aquiles (3 weeks ago): feat(firmware): Added bunch of code from other projects, not merged. Added lora_1 app", "has_changes": false, "is_detached": false, "is_stale": false}, {"name": "products/leaky-feeder/fw-lnavhf", "branch": "development", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "341454d - Arturo Veras (9 months ago): Remove legacy LNA_STM32G030 folder", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/leaky-feeder/fw-smartring", "branch": "main", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "a5bae49 - @alan274 (4 months ago): version de fw, sw en la que se fueron a cliente hmc", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/leaky-feeder/power-supply-24v-firmware", "branch": "dr_fuente_cpp", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "ee600de - @alan274 (12 months ago): DHCP_DICOVER (COMPLETO), DHCP_OFFER(RECIBIDO Y PROCESADO), DHCP_REQUEST(ARMADO, FALTA PROBAR), DHCP_ACKNOWLEDGMENT (FALTA PROCESAR RECEPCION)...... FALTA CREAR BUSQUEDA DE DIRECCIONES IP PARA ENCONTRAR SERVIDO TCP...... FALTA PASAR LA DATA OBTENIDA DE DHCP HACIA INICIO DE DE TCP CLIENTE.", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/leaky-feeder/sniffer-ethernet", "branch": "experimental", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "0b432b9 - alfonsorobles23 (2 years, 1 month ago): Cambio nombre carpeta 474_64PINS a Sniffer_Ethernet", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/smartlocate/sniffer-tag", "branch": "docs/documentos", "sync_remote": "Up to date", "local_changes": "🔴 M:1", "last_commit": "0daaccf - Arturo Veras (3 months ago): docs: actualizar documentación del proyecto SmartTag", "has_changes": true, "is_detached": false, "is_stale": true}, {"name": "products/smartlocate/sw-smartlocate", "branch": "feature/smarttag-mvp", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "33e03d6 - Arturo Veras (49 minutes ago): feat: add firmware version endpoint and update shared libs", "has_changes": false, "is_detached": false, "is_stale": false}, {"name": "products/sniffer-telemetry/fw-sniffertelemetry", "branch": "development", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "6d94d41 - Arturo Veras (5 months ago): docs: Update CHANGELOG and README for LoRa tool development", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/sniffer-telemetry/sw-sniffertelemetry", "branch": "development", "sync_remote": "Up to date", "local_changes": "🔴 M:1", "last_commit": "a9cf798 - Arturo ubuntu uqomm (5 months ago): subida de cambios en shared_libs", "has_changes": true, "is_detached": false, "is_stale": true}, {"name": "products/sw-noiseanalyzer", "branch": "main", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "9fe288a - Arturo Veras (9 months ago): feat: add alert history endpoints and update operation flow in README", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "products/vlad/fw-diagnostico-remoto-vlad", "branch": "main", "sync_remote": "Up to date", "local_changes": "🔴 M:2", "last_commit": "d4d8432 - Arturo Veras (4 months ago): chore: Update documentation submodule with reorganized structure", "has_changes": true, "is_detached": false, "is_stale": true}, {"name": "products/vlad/fw-vlad", "branch": "dev", "sync_remote": "Up to date", "local_changes": "🔴 M:1 🟡 U:2", "last_commit": "cc55e44 - Arturo Veras (2 days ago): feat(vlad): add UART DAC control stack and Qt source app (no generated artifacts)", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "products/vlad/sw-diagnosticoremoto", "branch": "tone-generator", "sync_remote": "No upstream", "local_changes": "🔴 M:18 🟣 D:21 🟡 U:11", "last_commit": "c28b517 - Arturo Veras (11 minutes ago): fix(a11y): add explicit labels, heading h1, and landmark cleanup", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "products/vlad/sw-vlad-certificador", "branch": "dev", "sync_remote": "Up to date", "local_changes": "🟡 U:11", "last_commit": "211b0e5 - Arturo Veras (9 months ago): docs: Update README to clarify app components and their hosting responsibilities", "has_changes": true, "is_detached": false, "is_stale": true}, {"name": "products/vlad/sw-vladserialnumberconfig", "branch": "development", "sync_remote": "Up to date", "local_changes": "🔴 M:1", "last_commit": "f7bfd61 - Arturo Uqomm (6 months ago): Update CHANGELOG and README for v5.0.0", "has_changes": true, "is_detached": false, "is_stale": true}, {"name": "shared/network-config/config-ip-addr", "branch": "master", "sync_remote": "Up to date", "local_changes": "🟡 U:4", "last_commit": "a4f640d - ignacio.ulloa (6 weeks ago): fix: adjust version footer positioning and styling", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "shared/scripts-minipc", "branch": "main", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "2d13bc7 - Arturo Veras (8 months ago): Refactor prompts-copi.md to remove merge conflict markers and enhance clarity; add new prompt templates for Gemini CLI and Git commit organization.", "has_changes": false, "is_detached": false, "is_stale": true}, {"name": "shared/sw-documentation", "branch": "master", "sync_remote": "Up to date", "local_changes": "🟣 D:29", "last_commit": "045ae30 - Arturo Veras (4 days ago): docs(smartlocate): remove Redis incident guide and references", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "shared/sw-git-workspace-global-viewer", "branch": "main", "sync_remote": "Up to date", "local_changes": "🔴 M:3", "last_commit": "d663d84 - Arturo Veras (14 minutes ago): feat: add global git workspace viewer agent and scanner", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "shared/sw-jiraanalysis", "branch": "main", "sync_remote": "Up to date", "local_changes": "🔴 M:5 🟣 D:2 🟡 U:3", "last_commit": "1453de9 - Arturo Veras (2 days ago): feat(appscript): correo consolidado por persona - proyectos + actividades en un solo email", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "shared/sw-Stm32Programmer", "branch": "master", "sync_remote": "Up to date", "local_changes": "🔴 M:2 🟡 U:2", "last_commit": "b701eee - Arturo Veras (4 months ago): Merge refactor/integrate-unified-programmer into master", "has_changes": true, "is_detached": false, "is_stale": true}, {"name": "shared/sw-testbench", "branch": "development", "sync_remote": "Up to date", "local_changes": "🔴 M:1 🟡 U:6", "last_commit": "193db6e - Arturo Veras (9 days ago): docs: add spectrum analyzer selection report with verified prices and calibration costs", "has_changes": true, "is_detached": false, "is_stale": false}, {"name": "shared/sw-vertexai-docsearch", "branch": "feature/gcp-deployment", "sync_remote": "Up to date", "local_changes": "🟢 Limpio", "last_commit": "fcf9bdd - Arturo Veras (3 months ago): Cambiar color del menú a amarillo (#FFD700)", "has_changes": false, "is_detached": false, "is_stale": true}];
+        const tableBody = document.querySelector('#repos-table tbody');
+        const searchInput = document.getElementById('search');
+        const dirtyFilter = document.getElementById('f-dirty');
+        const detachedFilter = document.getElementById('f-detached');
+        const staleFilter = document.getElementById('f-stale');
+
+        let sortKey = 'name';
+        let sortAsc = true;
+
+        function badgeForSync(text) {
+            const t = text.toLowerCase();
+            if (t.includes('up to date')) return '<span class="badge state-ok">Up to date</span>';
+            if (t.includes('ahead') || t.includes('behind') || t.includes('diverged')) return `<span class="badge state-warn">${text}</span>`;
+            return `<span class="badge">${text}</span>`;
+        }
+
+        function badgeForChanges(row) {
+            if (!row.has_changes) return '<span class="badge state-ok">🟢 Limpio</span>';
+            return `<span class="badge state-bad">${row.local_changes}</span>`;
+        }
+
+        function flags(row) {
+            const out = [];
+            if (row.is_detached) out.push('<span class="badge state-bad">Detached</span>');
+            if (row.is_stale) out.push('<span class="badge state-warn">Stale</span>');
+            if (!row.is_detached && !row.is_stale) out.push('<span class="badge state-ok">OK</span>');
+            return out.join(' ');
+        }
+
+        function getText(row) {
+            return [row.name, row.branch, row.sync_remote, row.local_changes, row.last_commit].join(' ').toLowerCase();
+        }
+
+        function render() {
+            const q = searchInput.value.trim().toLowerCase();
+            const filtered = rows
+                .filter(r => !q || getText(r).includes(q))
+                .filter(r => !dirtyFilter.checked || r.has_changes)
+                .filter(r => !detachedFilter.checked || r.is_detached)
+                .filter(r => !staleFilter.checked || r.is_stale)
+                .sort((a, b) => {
+                    const av = String(a[sortKey] ?? '').toLowerCase();
+                    const bv = String(b[sortKey] ?? '').toLowerCase();
+                    if (av < bv) return sortAsc ? -1 : 1;
+                    if (av > bv) return sortAsc ? 1 : -1;
+                    return 0;
+                });
+
+            tableBody.innerHTML = filtered.map(row => `
+                <tr>
+                    <td>${row.name}</td>
+                    <td>${row.branch}</td>
+                    <td>${badgeForSync(row.sync_remote)}</td>
+                    <td>${badgeForChanges(row)}</td>
+                    <td>${row.last_commit}</td>
+                    <td>${flags(row)}</td>
+                </tr>
+            `).join('');
+        }
+
+        searchInput.addEventListener('input', render);
+        dirtyFilter.addEventListener('change', render);
+        detachedFilter.addEventListener('change', render);
+        staleFilter.addEventListener('change', render);
+
+        document.querySelectorAll('th[data-key]').forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.getAttribute('data-key');
+                if (sortKey === key) sortAsc = !sortAsc;
+                else { sortKey = key; sortAsc = true; }
+                render();
+            });
+        });
+
+        render();
+    </script>
+</body>
+</html>

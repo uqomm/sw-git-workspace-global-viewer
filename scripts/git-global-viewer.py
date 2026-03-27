@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import subprocess
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List
 
 IGNORED_DIRS = {"node_modules", "vendor", ".venv", "dist", "build"}
 STALE_DAYS = 90
@@ -29,6 +31,19 @@ class RepoStatus:
     has_changes: bool
     is_detached: bool
     is_stale: bool
+
+
+def to_row(repo: RepoStatus) -> Dict[str, Any]:
+    return {
+        "name": repo.name,
+        "branch": repo.branch,
+        "sync_remote": repo.sync_remote,
+        "local_changes": repo.local_changes,
+        "last_commit": repo.last_commit,
+        "has_changes": repo.has_changes,
+        "is_detached": repo.is_detached,
+        "is_stale": repo.is_stale,
+    }
 
 
 def run_git(repo: Path, args: List[str]) -> tuple[int, str]:
@@ -221,26 +236,301 @@ def render_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -> str
     return "\n".join(lines) + "\n"
 
 
+def render_html_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -> str:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        total = len(repos)
+        dirty = len([r for r in repos if r.has_changes])
+        detached = len([r for r in repos if r.is_detached])
+        stale = len([r for r in repos if r.is_stale])
+
+        rows_json = json.dumps([to_row(r) for r in repos], ensure_ascii=False)
+        root_text = escape(str(root))
+
+        return f"""<!doctype html>
+<html lang=\"es\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>Git Workspace Global Viewer</title>
+    <style>
+        :root {{
+            --bg: #f6f7f9;
+            --surface: #ffffff;
+            --ink: #1a1f2c;
+            --muted: #5b667a;
+            --ok: #2f8f4e;
+            --warn: #d27a00;
+            --bad: #b42318;
+            --line: #dbe1ea;
+            --shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
+        }}
+
+        * {{ box-sizing: border-box; }}
+        body {{
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: radial-gradient(circle at 15% -10%, #e3f2fd, transparent 30%),
+                                    radial-gradient(circle at 90% -5%, #ffe8c7, transparent 25%),
+                                    var(--bg);
+            color: var(--ink);
+        }}
+
+        .wrap {{ max-width: 1400px; margin: 0 auto; padding: 20px; }}
+        .header {{
+            background: var(--surface);
+            border: 1px solid var(--line);
+            box-shadow: var(--shadow);
+            border-radius: 14px;
+            padding: 16px 18px;
+        }}
+        h1 {{ margin: 0 0 6px; font-size: 1.5rem; }}
+        .meta {{ color: var(--muted); font-size: 0.92rem; }}
+
+        .kpis {{
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(130px, 1fr));
+            gap: 10px;
+        }}
+        .kpi {{
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }}
+        .kpi .n {{ font-size: 1.4rem; font-weight: 700; }}
+        .kpi .l {{ color: var(--muted); font-size: 0.82rem; }}
+
+        .toolbar {{
+            margin-top: 14px;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+            align-items: center;
+        }}
+        .toolbar input[type=\"search\"] {{
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            font-size: 0.95rem;
+        }}
+        .checks {{ display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 0.9rem; }}
+
+        .table-wrap {{
+            margin-top: 14px;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: auto;
+            box-shadow: var(--shadow);
+        }}
+        table {{ width: 100%; border-collapse: collapse; min-width: 1050px; }}
+        th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #edf1f7; vertical-align: top; }}
+        th {{
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #f1f4f9;
+            font-size: 0.84rem;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            color: #344054;
+            cursor: pointer;
+            user-select: none;
+        }}
+        tr:hover td {{ background: #f9fbff; }}
+
+        .badge {{
+            display: inline-block;
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 0.75rem;
+            border: 1px solid var(--line);
+            background: #fff;
+            color: var(--muted);
+        }}
+        .state-ok {{ color: var(--ok); border-color: #b2dfc0; background: #effbf3; }}
+        .state-warn {{ color: var(--warn); border-color: #f6d39d; background: #fff8eb; }}
+        .state-bad {{ color: var(--bad); border-color: #f2b3ad; background: #fff2f1; }}
+
+        .footer {{ margin: 12px 0 4px; color: var(--muted); font-size: 0.82rem; }}
+
+        @media (max-width: 880px) {{
+            .kpis {{ grid-template-columns: repeat(2, minmax(130px, 1fr)); }}
+            .toolbar {{ grid-template-columns: 1fr; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class=\"wrap\">
+        <section class=\"header\">
+            <h1>Git Workspace Global Viewer (Read-Only)</h1>
+            <div class=\"meta\">Workspace: {root_text} | Profundidad: {max_depth} | Generado: {escape(now)}</div>
+            <div class=\"kpis\">
+                <div class=\"kpi\"><div class=\"n\">{total}</div><div class=\"l\">Repos detectados</div></div>
+                <div class=\"kpi\"><div class=\"n\">{dirty}</div><div class=\"l\">Con cambios locales</div></div>
+                <div class=\"kpi\"><div class=\"n\">{detached}</div><div class=\"l\">Detached HEAD</div></div>
+                <div class=\"kpi\"><div class=\"n\">{stale}</div><div class=\"l\">Potencialmente desactualizados</div></div>
+            </div>
+        </section>
+
+        <section class=\"toolbar\">
+            <input id=\"search\" type=\"search\" placeholder=\"Buscar repo, rama, commit o estado...\" />
+            <div class=\"checks\">
+                <label><input id=\"f-dirty\" type=\"checkbox\" /> Solo con cambios</label>
+                <label><input id=\"f-detached\" type=\"checkbox\" /> Solo detached</label>
+                <label><input id=\"f-stale\" type=\"checkbox\" /> Solo desactualizados</label>
+            </div>
+        </section>
+
+        <section class=\"table-wrap\">
+            <table id=\"repos-table\">
+                <thead>
+                    <tr>
+                        <th data-key=\"name\">Repositorio</th>
+                        <th data-key=\"branch\">Rama Actual</th>
+                        <th data-key=\"sync_remote\">Sync Remoto</th>
+                        <th data-key=\"local_changes\">Cambios Locales</th>
+                        <th data-key=\"last_commit\">Ultimo Commit</th>
+                        <th data-key=\"flags\">Alertas</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <div class=\"footer\">Modo solo lectura: no se ejecutan operaciones mutantes de Git.</div>
+    </div>
+
+    <script>
+        const rows = {rows_json};
+        const tableBody = document.querySelector('#repos-table tbody');
+        const searchInput = document.getElementById('search');
+        const dirtyFilter = document.getElementById('f-dirty');
+        const detachedFilter = document.getElementById('f-detached');
+        const staleFilter = document.getElementById('f-stale');
+
+        let sortKey = 'name';
+        let sortAsc = true;
+
+        function badgeForSync(text) {{
+            const t = text.toLowerCase();
+            if (t.includes('up to date')) return '<span class="badge state-ok">Up to date</span>';
+            if (t.includes('ahead') || t.includes('behind') || t.includes('diverged')) return `<span class="badge state-warn">${{text}}</span>`;
+            return `<span class="badge">${{text}}</span>`;
+        }}
+
+        function badgeForChanges(row) {{
+            if (!row.has_changes) return '<span class="badge state-ok">🟢 Limpio</span>';
+            return `<span class="badge state-bad">${{row.local_changes}}</span>`;
+        }}
+
+        function flags(row) {{
+            const out = [];
+            if (row.is_detached) out.push('<span class="badge state-bad">Detached</span>');
+            if (row.is_stale) out.push('<span class="badge state-warn">Stale</span>');
+            if (!row.is_detached && !row.is_stale) out.push('<span class="badge state-ok">OK</span>');
+            return out.join(' ');
+        }}
+
+        function getText(row) {{
+            return [row.name, row.branch, row.sync_remote, row.local_changes, row.last_commit].join(' ').toLowerCase();
+        }}
+
+        function render() {{
+            const q = searchInput.value.trim().toLowerCase();
+            const filtered = rows
+                .filter(r => !q || getText(r).includes(q))
+                .filter(r => !dirtyFilter.checked || r.has_changes)
+                .filter(r => !detachedFilter.checked || r.is_detached)
+                .filter(r => !staleFilter.checked || r.is_stale)
+                .sort((a, b) => {{
+                    const av = String(a[sortKey] ?? '').toLowerCase();
+                    const bv = String(b[sortKey] ?? '').toLowerCase();
+                    if (av < bv) return sortAsc ? -1 : 1;
+                    if (av > bv) return sortAsc ? 1 : -1;
+                    return 0;
+                }});
+
+            tableBody.innerHTML = filtered.map(row => `
+                <tr>
+                    <td>${{row.name}}</td>
+                    <td>${{row.branch}}</td>
+                    <td>${{badgeForSync(row.sync_remote)}}</td>
+                    <td>${{badgeForChanges(row)}}</td>
+                    <td>${{row.last_commit}}</td>
+                    <td>${{flags(row)}}</td>
+                </tr>
+            `).join('');
+        }}
+
+        searchInput.addEventListener('input', render);
+        dirtyFilter.addEventListener('change', render);
+        detachedFilter.addEventListener('change', render);
+        staleFilter.addEventListener('change', render);
+
+        document.querySelectorAll('th[data-key]').forEach(th => {{
+            th.addEventListener('click', () => {{
+                const key = th.getAttribute('data-key');
+                if (sortKey === key) sortAsc = !sortAsc;
+                else {{ sortKey = key; sortAsc = true; }}
+                render();
+            }});
+        }});
+
+        render();
+    </script>
+</body>
+</html>
+"""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Global Git workspace read-only viewer")
     parser.add_argument("--root", default=".", help="Workspace root path to scan")
     parser.add_argument("--max-depth", type=int, default=3, help="Max folder depth for .git discovery")
     parser.add_argument("--output", default="dashboard/global-git-dashboard.md", help="Markdown output file")
+    parser.add_argument(
+        "--html-output",
+        default="dashboard/global-git-dashboard.html",
+        help="Interactive HTML output file",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["md", "html", "both"],
+        default="both",
+        help="Output mode (default: both)",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
     repos = discover_repos(root, args.max_depth)
     statuses = [collect_repo_status(repo, root) for repo in repos]
-    dashboard = render_dashboard(statuses, root, args.max_depth)
+    md_dashboard = render_dashboard(statuses, root, args.max_depth)
+    html_dashboard = render_html_dashboard(statuses, root, args.max_depth)
 
-    output_path = Path(args.output)
-    if not output_path.is_absolute():
-        output_path = Path.cwd() / output_path
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(dashboard, encoding="utf-8")
+    if args.mode in {"md", "both"}:
+        output_path = Path(args.output)
+        if not output_path.is_absolute():
+            output_path = Path.cwd() / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(md_dashboard, encoding="utf-8")
+        print(md_dashboard)
+        print(f"Markdown dashboard written to: {output_path}")
 
-    print(dashboard)
-    print(f"Dashboard written to: {output_path}")
+    if args.mode in {"html", "both"}:
+        html_path = Path(args.html_output)
+        if not html_path.is_absolute():
+            html_path = Path.cwd() / html_path
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(html_dashboard, encoding="utf-8")
+        print(f"HTML dashboard written to: {html_path}")
+
     return 0
 
 
