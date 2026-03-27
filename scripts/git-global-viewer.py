@@ -347,7 +347,7 @@ def render_html_dashboard(
             --ink: #162033;
             --muted: #56637a;
             --ok: #1f7a46;
-            --warn: #b86b00;
+            --warn: #995300;
             --bad: #b42318;
             --line: #d8e0ea;
             --shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
@@ -361,6 +361,12 @@ def render_html_dashboard(
             --repo-active-border: #77a5e8;
             --chip-bg: #ffffff;
             --chip-border: var(--line);
+            --ok-bg: #effbf3;
+            --ok-border: #86cfa3;
+            --warn-bg: #fff8ec;
+            --warn-border: #e7be84;
+            --bad-bg: #fff2f1;
+            --bad-border: #e5a09b;
             --graph-bg: #0f1524;
             --graph-ink: #e5edff;
             --commit-bg: #fff;
@@ -373,9 +379,9 @@ def render_html_dashboard(
             --surface-2: #0f1828;
             --ink: #e3ebfb;
             --muted: #9fb0cc;
-            --ok: #63d297;
-            --warn: #f1b563;
-            --bad: #ef8a86;
+            --ok: #9ef0c4;
+            --warn: #ffd39b;
+            --bad: #ffb8b2;
             --line: #25344f;
             --shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
             --bg-grad-a: rgba(42, 101, 186, 0.35);
@@ -388,6 +394,12 @@ def render_html_dashboard(
             --repo-active-border: #6a9ae4;
             --chip-bg: #152036;
             --chip-border: #31476a;
+            --ok-bg: #173629;
+            --ok-border: #2f7556;
+            --warn-bg: #3d2b16;
+            --warn-border: #8d6630;
+            --bad-bg: #3d1d1f;
+            --bad-border: #915055;
             --graph-bg: #0a1120;
             --graph-ink: #d2e0ff;
             --commit-bg: #101b2f;
@@ -437,10 +449,14 @@ def render_html_dashboard(
             width: 100%;
             border: 1px solid var(--line);
             border-radius: 9px;
-            padding: 10px;
+            padding: 12px;
             font-size: 0.93rem;
+            min-height: 44px;
         }}
         .checks {{ display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 0.86rem; align-items: center; }}
+        .checks label {{ display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }}
+        .checks input[type=\"checkbox\"] {{ width: 18px; height: 18px; }}
+        .checks select {{ min-height: 44px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); padding: 0 8px; }}
 
         .layout {{
             margin-top: 12px;
@@ -477,6 +493,10 @@ def render_html_dashboard(
             margin-bottom: 6px;
             cursor: pointer;
             background: var(--surface-2);
+            min-height: 44px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }}
         .repo-item:hover {{ border-color: var(--line); background: var(--repo-hover); }}
         .repo-item.active {{ border-color: var(--repo-active-border); background: var(--repo-active); }}
@@ -493,9 +513,9 @@ def render_html_dashboard(
             color: var(--muted);
             margin-right: 4px;
         }}
-        .state-ok {{ color: var(--ok); border-color: #add9bc; background: #effbf3; }}
-        .state-warn {{ color: var(--warn); border-color: #f5d8a9; background: #fff8ec; }}
-        .state-bad {{ color: var(--bad); border-color: #efb2ae; background: #fff2f1; }}
+        .state-ok {{ color: var(--ok); border-color: var(--ok-border); background: var(--ok-bg); }}
+        .state-warn {{ color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }}
+        .state-bad {{ color: var(--bad); border-color: var(--bad-border); background: var(--bad-bg); }}
 
         .graph {{
             margin-top: 6px;
@@ -517,6 +537,7 @@ def render_html_dashboard(
             margin-top: 8px;
             cursor: pointer;
             background: var(--commit-bg);
+            min-height: 44px;
         }}
         .commit-item.active {{ border-color: var(--repo-active-border); background: var(--repo-active); }}
         .commit-head {{ font-family: Consolas, 'Courier New', monospace; font-size: 0.8rem; color: var(--ink); }}
@@ -525,6 +546,14 @@ def render_html_dashboard(
 
         .files-list {{ margin-top: 8px; font-family: Consolas, 'Courier New', monospace; font-size: 0.78rem; }}
         .file-row {{ padding: 2px 0; border-bottom: 1px dashed var(--line); }}
+
+        input:focus-visible,
+        select:focus-visible,
+        .repo-item:focus-visible,
+        .commit-item:focus-visible {{
+            outline: 3px solid var(--repo-active-border);
+            outline-offset: 2px;
+        }}
 
         .footer {{ margin-top: 8px; color: var(--muted); font-size: 0.8rem; }}
 
@@ -553,6 +582,7 @@ def render_html_dashboard(
                 <label><input id=\"f-stale\" type=\"checkbox\" /> Solo stale</label>
                 <label><input id=\"theme-dark\" type=\"checkbox\" /> Dark mode</label>
                 <label><input id=\"f-autorefresh\" type=\"checkbox\" /> Auto-refresh</label>
+                <label for=\"refresh-sec\">Intervalo</label>
                 <select id=\"refresh-sec\">
                     <option value=\"15\">15s</option>
                     <option value=\"30\">30s</option>
@@ -629,6 +659,15 @@ def render_html_dashboard(
 
         function badge(text, klass='') {{ return `<span class=\"badge ${{klass}}\">${{text}}</span>`; }}
 
+        function esc(value) {{
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }}
+
         function badgeSync(text) {{
             const t = String(text).toLowerCase();
             if (t.includes('up to date')) return badge('Up to date', 'state-ok');
@@ -688,15 +727,21 @@ def render_html_dashboard(
                 if (r.is_detached) flags.push(badge('Detached', 'state-bad'));
                 if (r.is_stale) flags.push(badge('Stale', 'state-warn'));
                 const cls = r.name === state.selectedRepo ? 'repo-item active' : 'repo-item';
-                return `<div class=\"${{cls}}\" data-repo=\"${{r.name}}\">\
-                    <div class=\"repo-name\">${{r.name}}</div>\
-                    <div class=\"repo-meta\">Rama: ${{r.branch}}</div>\
+                return `<div class=\"${{cls}}\" role=\"button\" tabindex=\"0\" data-repo=\"${{esc(r.name)}}\" aria-label=\"Abrir repositorio ${{esc(r.name)}}\">\
+                    <div class=\"repo-name\">${{esc(r.name)}}</div>\
+                    <div class=\"repo-meta\">Rama: ${{esc(r.branch)}}</div>\
                     <div class=\"repo-meta\">${{flags.join(' ')}}</div>\
                 </div>`;
             }}).join('');
 
             el.repoList.querySelectorAll('.repo-item').forEach(node => {{
                 node.addEventListener('click', () => selectRepo(node.getAttribute('data-repo')));
+                node.addEventListener('keydown', (evt) => {{
+                    if (evt.key === 'Enter' || evt.key === ' ') {{
+                        evt.preventDefault();
+                        selectRepo(node.getAttribute('data-repo'));
+                    }}
+                }});
             }});
         }}
 
@@ -722,15 +767,21 @@ def render_html_dashboard(
 
             el.commitList.innerHTML = commits.map(c => {{
                 const active = state.selectedCommitByRepo[repo.name] === c.hash ? 'commit-item active' : 'commit-item';
-                return `<div class=\"${{active}}\" data-h=\"${{c.hash}}\">\
-                    <div class=\"commit-head\">${{c.hash}}</div>\
-                    <div class=\"commit-subj\">${{c.subject}}</div>\
-                    <div class=\"commit-meta\">${{c.author}} - ${{c.rel_time}}</div>\
+                return `<div class=\"${{active}}\" role=\"button\" tabindex=\"0\" data-h=\"${{esc(c.hash)}}\" aria-label=\"Ver commit ${{esc(c.hash)}}\">\
+                    <div class=\"commit-head\">${{esc(c.hash)}}</div>\
+                    <div class=\"commit-subj\">${{esc(c.subject)}}</div>\
+                    <div class=\"commit-meta\">${{esc(c.author)}} - ${{esc(c.rel_time)}}</div>\
                 </div>`;
             }}).join('') || '<div class=\"repo-meta\">Sin commits.</div>';
 
             el.commitList.querySelectorAll('.commit-item').forEach(node => {{
                 node.addEventListener('click', () => selectCommit(repo.name, node.getAttribute('data-h')));
+                node.addEventListener('keydown', (evt) => {{
+                    if (evt.key === 'Enter' || evt.key === ' ') {{
+                        evt.preventDefault();
+                        selectCommit(repo.name, node.getAttribute('data-h'));
+                    }}
+                }});
             }});
         }}
 
@@ -752,16 +803,16 @@ def render_html_dashboard(
             const commit = commits.find(c => c.hash === selectedHash) || commits[0];
             if (!commit) {{ el.commitDetail.innerHTML = 'Sin commits para este repositorio.'; return; }}
 
-            const refs = commit.refs ? `<div class=\"repo-meta\">Refs: ${{commit.refs}}</div>` : '';
-            const files = (commit.files || []).map(f => `<div class=\"file-row\">${{f}}</div>`).join('');
+            const refs = commit.refs ? `<div class=\"repo-meta\">Refs: ${{esc(commit.refs)}}</div>` : '';
+            const files = (commit.files || []).map(f => `<div class=\"file-row\">${{esc(f)}}</div>`).join('');
             const more = commit.files_total > (commit.files || []).length
                 ? `<div class=\"repo-meta\">... y ${{commit.files_total - (commit.files || []).length}} archivo(s) mas</div>`
                 : '';
 
             el.commitDetail.innerHTML = `
-                <div class=\"commit-head\">${{commit.hash}} <span class=\"repo-meta\">(${{commit.full_hash}})</span></div>
-                <div class=\"commit-subj\">${{commit.subject}}</div>
-                <div class=\"commit-meta\">Autor: ${{commit.author}} | Fecha: ${{commit.rel_time}}</div>
+                <div class=\"commit-head\">${{esc(commit.hash)}} <span class=\"repo-meta\">(${{esc(commit.full_hash)}})</span></div>
+                <div class=\"commit-subj\">${{esc(commit.subject)}}</div>
+                <div class=\"commit-meta\">Autor: ${{esc(commit.author)}} | Fecha: ${{esc(commit.rel_time)}}</div>
                 ${{refs}}
                 <div class=\"files-list\">${{files || '<div class=\"repo-meta\">Sin archivos detectados para este commit.</div>'}}</div>
                 ${{more}}
