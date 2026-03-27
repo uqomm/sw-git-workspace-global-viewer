@@ -639,7 +639,7 @@ def render_html_dashboard(
 
             el.middleTitle.textContent = `Timeline: ${{repo.name}}`;
             el.repoSummary.innerHTML = `<div class=\"repo-meta\">Rama actual: <b>${{repo.branch}}</b> | ${{badgeSync(repo.sync_remote)}} ${{badgeChanges(repo)}}</div>`;
-            el.graphView.textContent = (repo.history_graph || []).join('\n') || 'Sin historial disponible';
+            el.graphView.textContent = (repo.history_graph || []).join('\\n') || 'Sin historial disponible';
 
             const commits = repo.recent_commits || [];
             if (!state.selectedCommitByRepo[repo.name] && commits.length) {{
@@ -698,6 +698,11 @@ def render_html_dashboard(
             if (refreshTimer) {{ clearInterval(refreshTimer); refreshTimer = null; }}
             if (!el.auto.checked) return;
             const seconds = parseInt(el.refreshSec.value, 10) || 30;
+            const canReload = window.location.protocol !== 'file:';
+            if (!canReload) {{
+                console.warn('Auto-refresh deshabilitado en file:// por restricciones del navegador/visor.');
+                return;
+            }}
             refreshTimer = setInterval(() => window.location.reload(), Math.max(seconds, 10) * 1000);
         }}
 
