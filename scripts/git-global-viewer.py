@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 IGNORED_DIRS = {"node_modules", "vendor", ".venv", "dist", "build"}
 STALE_DAYS = 90
@@ -31,6 +31,7 @@ class RepoStatus:
     has_changes: bool
     is_detached: bool
     is_stale: bool
+    last_activity_ts: Optional[int]
     history_graph: List[str]
     recent_commits: List[Dict[str, Any]]
 
@@ -45,6 +46,7 @@ def to_row(repo: RepoStatus) -> Dict[str, Any]:
         "has_changes": repo.has_changes,
         "is_detached": repo.is_detached,
         "is_stale": repo.is_stale,
+        "last_activity_ts": repo.last_activity_ts,
         "history_graph": repo.history_graph,
         "recent_commits": repo.recent_commits,
     }
@@ -145,22 +147,24 @@ def working_tree(repo: Path) -> tuple[str, bool]:
     return " ".join(parts), True
 
 
-def last_commit(repo: Path) -> tuple[str, bool]:
+def last_commit(repo: Path) -> tuple[str, bool, Optional[int]]:
     code, out = run_git(
         repo,
         ["log", "-1", '--format=%h - %an (%ar): %s'],
     )
     if code != 0 or not out:
-        return "No commits", False
+        return "No commits", False, None
 
     code_ts, ts = run_git(repo, ["log", "-1", "--format=%ct"])
     is_stale = False
+    commit_ts: Optional[int] = None
     if code_ts == 0 and ts.isdigit():
-        commit_date = dt.datetime.fromtimestamp(int(ts), tz=dt.timezone.utc)
+        commit_ts = int(ts)
+        commit_date = dt.datetime.fromtimestamp(commit_ts, tz=dt.timezone.utc)
         age_days = (dt.datetime.now(tz=dt.timezone.utc) - commit_date).days
         is_stale = age_days >= STALE_DAYS
 
-    return out, is_stale
+    return out, is_stale, commit_ts
 
 
 def branch_state(repo: Path) -> tuple[str, bool]:
@@ -246,7 +250,7 @@ def collect_repo_status(
     branch, is_detached = branch_state(repo)
     sync_remote_state = sync_state(repo)
     local_changes, has_changes = working_tree(repo)
-    latest_commit, is_stale = last_commit(repo)
+    latest_commit, is_stale, last_activity_ts = last_commit(repo)
     history_graph = collect_history_graph(repo, graph_limit)
     recent_commits = collect_recent_commits(repo, commit_limit, commit_files_limit)
 
@@ -261,6 +265,7 @@ def collect_repo_status(
         has_changes=has_changes,
         is_detached=is_detached,
         is_stale=is_stale,
+        last_activity_ts=last_activity_ts,
         history_graph=history_graph,
         recent_commits=recent_commits,
     )
@@ -338,6 +343,7 @@ def render_html_dashboard(
         :root {{
             --bg: #f6f7f9;
             --surface: #ffffff;
+            --surface-2: #f8fafc;
             --ink: #162033;
             --muted: #56637a;
             --ok: #1f7a46;
@@ -345,6 +351,47 @@ def render_html_dashboard(
             --bad: #b42318;
             --line: #d8e0ea;
             --shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
+            --bg-grad-a: rgba(145, 200, 255, 0.5);
+            --bg-grad-b: rgba(255, 214, 153, 0.45);
+            --bg-grad-c: rgba(200, 231, 255, 0.35);
+            --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.95));
+            --header-grad: linear-gradient(120deg, rgba(232, 244, 255, 0.9), rgba(255, 247, 232, 0.9));
+            --repo-hover: #f7fbff;
+            --repo-active: #eef5ff;
+            --repo-active-border: #77a5e8;
+            --chip-bg: #ffffff;
+            --chip-border: var(--line);
+            --graph-bg: #0f1524;
+            --graph-ink: #e5edff;
+            --commit-bg: #fff;
+            --commit-border: #e8edf5;
+        }}
+
+        :root[data-theme='dark'] {{
+            --bg: #0b1220;
+            --surface: #111a2d;
+            --surface-2: #0f1828;
+            --ink: #e3ebfb;
+            --muted: #9fb0cc;
+            --ok: #63d297;
+            --warn: #f1b563;
+            --bad: #ef8a86;
+            --line: #25344f;
+            --shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+            --bg-grad-a: rgba(42, 101, 186, 0.35);
+            --bg-grad-b: rgba(171, 118, 27, 0.22);
+            --bg-grad-c: rgba(23, 51, 94, 0.5);
+            --panel-grad: linear-gradient(180deg, rgba(17, 26, 45, 0.95), rgba(15, 24, 40, 0.95));
+            --header-grad: linear-gradient(120deg, rgba(26, 46, 77, 0.85), rgba(64, 41, 18, 0.55));
+            --repo-hover: #16233b;
+            --repo-active: #1c3152;
+            --repo-active-border: #6a9ae4;
+            --chip-bg: #152036;
+            --chip-border: #31476a;
+            --graph-bg: #0a1120;
+            --graph-ink: #d2e0ff;
+            --commit-bg: #101b2f;
+            --commit-border: #2a3b59;
         }}
 
         * {{ box-sizing: border-box; }}
@@ -353,23 +400,26 @@ def render_html_dashboard(
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: radial-gradient(circle at 10% -8%, #dcefff, transparent 30%),
                                     radial-gradient(circle at 92% -8%, #ffeccf, transparent 24%),
+                                    radial-gradient(circle at 50% 110%, var(--bg-grad-c), transparent 45%),
                                     var(--bg);
             color: var(--ink);
+            transition: background-color 220ms ease, color 220ms ease;
         }}
 
         .wrap {{ max-width: 1600px; margin: 0 auto; padding: 18px; }}
         .header {{
-            background: var(--surface);
+            background: var(--header-grad), var(--surface);
             border: 1px solid var(--line);
             border-radius: 14px;
             box-shadow: var(--shadow);
             padding: 14px 16px;
+            backdrop-filter: blur(4px);
         }}
         .header h1 {{ margin: 0; font-size: 1.3rem; }}
         .meta {{ margin-top: 5px; color: var(--muted); font-size: 0.9rem; }}
 
         .kpis {{ margin-top: 12px; display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }}
-        .kpi {{ background: #fbfcfe; border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; }}
+        .kpi {{ background: var(--panel-grad); border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; }}
         .kpi .n {{ font-size: 1.35rem; font-weight: 700; }}
         .kpi .l {{ color: var(--muted); font-size: 0.8rem; }}
 
@@ -378,7 +428,7 @@ def render_html_dashboard(
             display: grid;
             grid-template-columns: 1fr auto;
             gap: 12px;
-            background: var(--surface);
+            background: var(--panel-grad), var(--surface);
             border: 1px solid var(--line);
             border-radius: 12px;
             padding: 10px;
@@ -400,7 +450,7 @@ def render_html_dashboard(
             min-height: 72vh;
         }}
         .panel {{
-            background: var(--surface);
+            background: var(--panel-grad), var(--surface);
             border: 1px solid var(--line);
             border-radius: 12px;
             box-shadow: var(--shadow);
@@ -414,9 +464,9 @@ def render_html_dashboard(
             font-size: 0.83rem;
             text-transform: uppercase;
             letter-spacing: 0.03em;
-            color: #344054;
-            border-bottom: 1px solid #edf1f7;
-            background: #f7f9fc;
+            color: var(--muted);
+            border-bottom: 1px solid var(--line);
+            background: var(--surface-2);
         }}
         .panel-body {{ padding: 10px; overflow: auto; flex: 1; }}
 
@@ -426,10 +476,10 @@ def render_html_dashboard(
             border: 1px solid transparent;
             margin-bottom: 6px;
             cursor: pointer;
-            background: #fbfcfe;
+            background: var(--surface-2);
         }}
-        .repo-item:hover {{ border-color: #d6e2f3; background: #f7fbff; }}
-        .repo-item.active {{ border-color: #77a5e8; background: #eef5ff; }}
+        .repo-item:hover {{ border-color: var(--line); background: var(--repo-hover); }}
+        .repo-item.active {{ border-color: var(--repo-active-border); background: var(--repo-active); }}
         .repo-name {{ font-size: 0.9rem; font-weight: 600; }}
         .repo-meta {{ margin-top: 3px; color: var(--muted); font-size: 0.78rem; }}
 
@@ -438,8 +488,8 @@ def render_html_dashboard(
             border-radius: 999px;
             padding: 2px 7px;
             font-size: 0.74rem;
-            border: 1px solid var(--line);
-            background: #fff;
+            border: 1px solid var(--chip-border);
+            background: var(--chip-bg);
             color: var(--muted);
             margin-right: 4px;
         }}
@@ -451,8 +501,8 @@ def render_html_dashboard(
             margin-top: 6px;
             font-family: Consolas, 'Courier New', monospace;
             font-size: 0.78rem;
-            background: #0f1524;
-            color: #e5edff;
+            background: var(--graph-bg);
+            color: var(--graph-ink);
             border-radius: 8px;
             padding: 8px;
             max-height: 220px;
@@ -461,20 +511,20 @@ def render_html_dashboard(
         }}
 
         .commit-item {{
-            border: 1px solid #e8edf5;
+            border: 1px solid var(--commit-border);
             border-radius: 8px;
             padding: 8px;
             margin-top: 8px;
             cursor: pointer;
-            background: #fff;
+            background: var(--commit-bg);
         }}
-        .commit-item.active {{ border-color: #79a8eb; background: #f2f7ff; }}
-        .commit-head {{ font-family: Consolas, 'Courier New', monospace; font-size: 0.8rem; color: #334155; }}
+        .commit-item.active {{ border-color: var(--repo-active-border); background: var(--repo-active); }}
+        .commit-head {{ font-family: Consolas, 'Courier New', monospace; font-size: 0.8rem; color: var(--ink); }}
         .commit-subj {{ margin-top: 2px; font-size: 0.86rem; }}
         .commit-meta {{ margin-top: 2px; color: var(--muted); font-size: 0.75rem; }}
 
         .files-list {{ margin-top: 8px; font-family: Consolas, 'Courier New', monospace; font-size: 0.78rem; }}
-        .file-row {{ padding: 2px 0; border-bottom: 1px dashed #eff2f7; }}
+        .file-row {{ padding: 2px 0; border-bottom: 1px dashed var(--line); }}
 
         .footer {{ margin-top: 8px; color: var(--muted); font-size: 0.8rem; }}
 
@@ -501,6 +551,7 @@ def render_html_dashboard(
                 <label><input id=\"f-dirty\" type=\"checkbox\" /> Solo cambios</label>
                 <label><input id=\"f-detached\" type=\"checkbox\" /> Solo detached</label>
                 <label><input id=\"f-stale\" type=\"checkbox\" /> Solo stale</label>
+                <label><input id=\"theme-dark\" type=\"checkbox\" /> Dark mode</label>
                 <label><input id=\"f-autorefresh\" type=\"checkbox\" /> Auto-refresh</label>
                 <select id=\"refresh-sec\">
                     <option value=\"15\">15s</option>
@@ -551,12 +602,30 @@ def render_html_dashboard(
             dirty: document.getElementById('f-dirty'),
             detached: document.getElementById('f-detached'),
             stale: document.getElementById('f-stale'),
+            themeDark: document.getElementById('theme-dark'),
             auto: document.getElementById('f-autorefresh'),
             refreshSec: document.getElementById('refresh-sec'),
         }};
 
         el.refreshSec.value = String({default_refresh} || 30);
         if ({default_refresh} > 0) {{ el.auto.checked = true; }}
+
+        function prefersDark() {{
+            return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        }}
+
+        function applyTheme(theme) {{
+            const selectedTheme = theme === 'dark' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', selectedTheme);
+            el.themeDark.checked = selectedTheme === 'dark';
+            try {{ localStorage.setItem('gwgv-theme', selectedTheme); }} catch (_err) {{}}
+        }}
+
+        function initTheme() {{
+            let saved = null;
+            try {{ saved = localStorage.getItem('gwgv-theme'); }} catch (_err) {{}}
+            applyTheme(saved || (prefersDark() ? 'dark' : 'light'));
+        }}
 
         function badge(text, klass='') {{ return `<span class=\"badge ${{klass}}\">${{text}}</span>`; }}
 
@@ -584,7 +653,12 @@ def render_html_dashboard(
                 .filter(r => !el.dirty.checked || r.has_changes)
                 .filter(r => !el.detached.checked || r.is_detached)
                 .filter(r => !el.stale.checked || r.is_stale)
-                .sort((a, b) => a.name.localeCompare(b.name));
+                .sort((a, b) => {{
+                    const ta = Number(a.last_activity_ts || 0);
+                    const tb = Number(b.last_activity_ts || 0);
+                    if (tb !== ta) return tb - ta;
+                    return a.name.localeCompare(b.name);
+                }});
         }}
 
         function selectRepo(name) {{ state.selectedRepo = name; render(); }}
@@ -713,9 +787,11 @@ def render_html_dashboard(
         }}
 
         [el.search, el.dirty, el.detached, el.stale].forEach(node => node.addEventListener('input', render));
+        el.themeDark.addEventListener('change', () => applyTheme(el.themeDark.checked ? 'dark' : 'light'));
         el.auto.addEventListener('change', setupAutoRefresh);
         el.refreshSec.addEventListener('change', setupAutoRefresh);
 
+        initTheme();
         render();
         setupAutoRefresh();
     </script>

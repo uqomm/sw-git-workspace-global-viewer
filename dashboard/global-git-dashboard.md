@@ -2,7 +2,7 @@
 
 - Workspace: `C:\Users\artur\development`
 - Profundidad maxima: `3`
-- Generado: `2026-03-27 11:39:29`
+- Generado: `2026-03-27 11:45:07`
 
 | Repositorio | Rama Actual | Sync Remoto | Cambios Locales | Ultimo Commit |
 |-------------|-------------|-------------|-----------------|---------------|
@@ -13,7 +13,7 @@
 | `desicion-maker` | `improve-computer-decision` | `Up to date` | 🔴 M:1 🟡 U:17 | `21c4f2d - Arturo Veras (3 months ago): feat: agregar análisis de refactoring CommandMessage` |
 | `legacy/gateway/fw-gateway1Lora` | `development` | `Up to date` | 🟢 Limpio | `a48c063 - Arturo Veras (4 months ago): docs: Remove obsolete documentation files for Logger, UART changes, and GUI manual` |
 | `legacy/sigmatag` | `development` | `Ahead 1` | 🟢 Limpio | `6832c5f - arturo33 (2 years, 8 months ago): add uqomm theme and remove internet libraries` |
-| `products/drs/sw-drsmonitoring` | `drs-installer` | `Up to date` | 🔴 M:2 🟡 U:2 | `cec5a5ac - Arturo Veras (51 minutes ago): feat(installer): migrate apply flow to python and remove shell delegate` |
+| `products/drs/sw-drsmonitoring` | `drs-installer` | `Up to date` | 🔴 M:1 | `3dfd07ee - Arturo Veras (3 minutes ago): feat(installer): consolidate robust offline flow into master-installer` |
 | `products/drs/sw-DrsValidator` | `development` | `Up to date` | 🟢 Limpio | `bb2918f - Arturo Veras (2 months ago): feat: Add pyproject.toml with UV dependency management` |
 | `products/leaky-feeder/fw-gateway2Lora` | `feature/fsk-reader-becker-varis` | `Up to date` | 🔴 M:2 🟡 U:3 | `9b6a3e5 - Arturo Veras (3 hours ago): feat(firmware): add spi_transductor project (STM32L476)` |
 | `products/leaky-feeder/fw-headend` | `development` | `Up to date` | 🔴 M:1 | `54928b1 - aquiles (24 hours ago): fix(firmware): Removed the red display on low RF power measures` |
@@ -23,19 +23,19 @@
 | `products/leaky-feeder/power-supply-24v-firmware` | `dr_fuente_cpp` | `Up to date` | 🟢 Limpio | `ee600de - @alan274 (12 months ago): DHCP_DICOVER (COMPLETO), DHCP_OFFER(RECIBIDO Y PROCESADO), DHCP_REQUEST(ARMADO, FALTA PROBAR), DHCP_ACKNOWLEDGMENT (FALTA PROCESAR RECEPCION)...... FALTA CREAR BUSQUEDA DE DIRECCIONES IP PARA ENCONTRAR SERVIDO TCP...... FALTA PASAR LA DATA OBTENIDA DE DHCP HACIA INICIO DE DE TCP CLIENTE.` |
 | `products/leaky-feeder/sniffer-ethernet` | `experimental` | `Up to date` | 🟢 Limpio | `0b432b9 - alfonsorobles23 (2 years, 1 month ago): Cambio nombre carpeta 474_64PINS a Sniffer_Ethernet` |
 | `products/smartlocate/sniffer-tag` | `docs/documentos` | `Up to date` | 🔴 M:1 | `0daaccf - Arturo Veras (3 months ago): docs: actualizar documentación del proyecto SmartTag` |
-| `products/smartlocate/sw-smartlocate` | `feature/smarttag-mvp` | `Up to date` | 🟢 Limpio | `33e03d6 - Arturo Veras (88 minutes ago): feat: add firmware version endpoint and update shared libs` |
+| `products/smartlocate/sw-smartlocate` | `feature/smarttag-mvp` | `Up to date` | 🟢 Limpio | `33e03d6 - Arturo Veras (2 hours ago): feat: add firmware version endpoint and update shared libs` |
 | `products/sniffer-telemetry/fw-sniffertelemetry` | `development` | `Up to date` | 🟢 Limpio | `6d94d41 - Arturo Veras (5 months ago): docs: Update CHANGELOG and README for LoRa tool development` |
 | `products/sniffer-telemetry/sw-sniffertelemetry` | `development` | `Up to date` | 🔴 M:1 | `a9cf798 - Arturo ubuntu uqomm (5 months ago): subida de cambios en shared_libs` |
 | `products/sw-noiseanalyzer` | `main` | `Up to date` | 🟢 Limpio | `9fe288a - Arturo Veras (9 months ago): feat: add alert history endpoints and update operation flow in README` |
 | `products/vlad/fw-diagnostico-remoto-vlad` | `main` | `Up to date` | 🔴 M:2 | `d4d8432 - Arturo Veras (4 months ago): chore: Update documentation submodule with reorganized structure` |
 | `products/vlad/fw-vlad` | `dev` | `Up to date` | 🔴 M:1 🟡 U:2 | `cc55e44 - Arturo Veras (2 days ago): feat(vlad): add UART DAC control stack and Qt source app (no generated artifacts)` |
-| `products/vlad/sw-diagnosticoremoto` | `tone-generator` | `No upstream` | 🔴 M:18 🟣 D:21 🟡 U:14 | `4d509ab - Arturo Veras (18 seconds ago): fix(a11y): repair unified alerts metrics block markup` |
+| `products/vlad/sw-diagnosticoremoto` | `tone-generator` | `No upstream` | 🔴 M:18 🟣 D:21 🟡 U:14 | `4d509ab - Arturo Veras (6 minutes ago): fix(a11y): repair unified alerts metrics block markup` |
 | `products/vlad/sw-vlad-certificador` | `dev` | `Up to date` | 🟡 U:11 | `211b0e5 - Arturo Veras (9 months ago): docs: Update README to clarify app components and their hosting responsibilities` |
 | `products/vlad/sw-vladserialnumberconfig` | `development` | `Up to date` | 🔴 M:1 | `f7bfd61 - Arturo Uqomm (6 months ago): Update CHANGELOG and README for v5.0.0` |
 | `shared/network-config/config-ip-addr` | `master` | `Up to date` | 🟡 U:4 | `a4f640d - ignacio.ulloa (6 weeks ago): fix: adjust version footer positioning and styling` |
 | `shared/scripts-minipc` | `main` | `Up to date` | 🟢 Limpio | `2d13bc7 - Arturo Veras (8 months ago): Refactor prompts-copi.md to remove merge conflict markers and enhance clarity; add new prompt templates for Gemini CLI and Git commit organization.` |
 | `shared/sw-documentation` | `master` | `Up to date` | 🟣 D:29 | `045ae30 - Arturo Veras (4 days ago): docs(smartlocate): remove Redis incident guide and references` |
-| `shared/sw-git-workspace-global-viewer` | `main` | `Up to date` | 🔴 M:1 | `ae62123 - Arturo Veras (4 minutes ago): feat(ui): add gitkraken-like read-only timeline and commit details` |
+| `shared/sw-git-workspace-global-viewer` | `main` | `Up to date` | 🔴 M:3 | `7854fa1 - Arturo Veras (5 minutes ago): fix(ui): resolve html syntax error and disable file:// auto-refresh` |
 | `shared/sw-jiraanalysis` | `main` | `Up to date` | 🔴 M:5 🟣 D:2 🟡 U:3 | `1453de9 - Arturo Veras (2 days ago): feat(appscript): correo consolidado por persona - proyectos + actividades en un solo email` |
 | `shared/sw-Stm32Programmer` | `master` | `Up to date` | 🔴 M:2 🟡 U:2 | `b701eee - Arturo Veras (4 months ago): Merge refactor/integrate-unified-programmer into master` |
 | `shared/sw-testbench` | `development` | `Up to date` | 🔴 M:1 🟡 U:6 | `193db6e - Arturo Veras (9 days ago): docs: add spectrum analyzer selection report with verified prices and calibration costs` |
@@ -51,7 +51,7 @@
 - Repos con cambios locales sin guardar:
   - `_recovery/orphan-modules-20260320-2/director` -> 🔴 M:2
   - `desicion-maker` -> 🔴 M:1 🟡 U:17
-  - `products/drs/sw-drsmonitoring` -> 🔴 M:2 🟡 U:2
+  - `products/drs/sw-drsmonitoring` -> 🔴 M:1
   - `products/leaky-feeder/fw-gateway2Lora` -> 🔴 M:2 🟡 U:3
   - `products/leaky-feeder/fw-headend` -> 🔴 M:1
   - `products/smartlocate/sniffer-tag` -> 🔴 M:1
@@ -63,7 +63,7 @@
   - `products/vlad/sw-vladserialnumberconfig` -> 🔴 M:1
   - `shared/network-config/config-ip-addr` -> 🟡 U:4
   - `shared/sw-documentation` -> 🟣 D:29
-  - `shared/sw-git-workspace-global-viewer` -> 🔴 M:1
+  - `shared/sw-git-workspace-global-viewer` -> 🔴 M:3
   - `shared/sw-jiraanalysis` -> 🔴 M:5 🟣 D:2 🟡 U:3
   - `shared/sw-Stm32Programmer` -> 🔴 M:2 🟡 U:2
   - `shared/sw-testbench` -> 🔴 M:1 🟡 U:6
