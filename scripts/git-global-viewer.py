@@ -31,6 +31,8 @@ class RepoStatus:
     has_changes: bool
     is_detached: bool
     is_stale: bool
+    history_graph: List[str]
+    recent_commits: List[Dict[str, Any]]
 
 
 def to_row(repo: RepoStatus) -> Dict[str, Any]:
@@ -43,6 +45,8 @@ def to_row(repo: RepoStatus) -> Dict[str, Any]:
         "has_changes": repo.has_changes,
         "is_detached": repo.is_detached,
         "is_stale": repo.is_stale,
+        "history_graph": repo.history_graph,
+        "recent_commits": repo.recent_commits,
     }
 
 
@@ -170,11 +174,81 @@ def branch_state(repo: Path) -> tuple[str, bool]:
     return "Unknown", True
 
 
-def collect_repo_status(repo: Path, root: Path) -> RepoStatus:
+def collect_history_graph(repo: Path, limit: int) -> List[str]:
+    code, out = run_git(
+        repo,
+        ["log", "--graph", "--decorate", "--oneline", f"--max-count={limit}", "--all"],
+    )
+    if code != 0 or not out:
+        return []
+    return out.splitlines()
+
+
+def collect_recent_commits(repo: Path, limit: int, files_limit: int) -> List[Dict[str, Any]]:
+    code, out = run_git(
+        repo,
+        [
+            "log",
+            "--all",
+            "--date=relative",
+            "--pretty=format:%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1f%d",
+            f"--max-count={limit}",
+        ],
+    )
+    if code != 0 or not out:
+        return []
+
+    commits: List[Dict[str, Any]] = []
+    for line in out.splitlines():
+        parts = line.split("\x1f")
+        if len(parts) < 6:
+            continue
+
+        full_hash, short_hash, author, rel_time, subject, refs = parts[:6]
+        code_files, files_out = run_git(
+            repo,
+            ["show", "--name-status", "--pretty=format:", "--max-count=1", full_hash],
+        )
+        changed_files: List[str] = []
+        if code_files == 0 and files_out:
+            for fline in files_out.splitlines():
+                raw = fline.strip()
+                if not raw:
+                    continue
+                fp = raw.split("\t")
+                if len(fp) >= 2:
+                    changed_files.append(f"{fp[0]} {fp[-1]}")
+                else:
+                    changed_files.append(raw)
+
+        commits.append(
+            {
+                "hash": short_hash,
+                "full_hash": full_hash,
+                "author": author,
+                "rel_time": rel_time,
+                "subject": subject,
+                "refs": refs.strip(),
+                "files": changed_files[:files_limit],
+                "files_total": len(changed_files),
+            }
+        )
+    return commits
+
+
+def collect_repo_status(
+    repo: Path,
+    root: Path,
+    graph_limit: int,
+    commit_limit: int,
+    commit_files_limit: int,
+) -> RepoStatus:
     branch, is_detached = branch_state(repo)
     sync_remote_state = sync_state(repo)
     local_changes, has_changes = working_tree(repo)
     latest_commit, is_stale = last_commit(repo)
+    history_graph = collect_history_graph(repo, graph_limit)
+    recent_commits = collect_recent_commits(repo, commit_limit, commit_files_limit)
 
     display_name = str(repo.relative_to(root)).replace("\\", "/")
     return RepoStatus(
@@ -187,6 +261,8 @@ def collect_repo_status(repo: Path, root: Path) -> RepoStatus:
         has_changes=has_changes,
         is_detached=is_detached,
         is_stale=is_stale,
+        history_graph=history_graph,
+        recent_commits=recent_commits,
     )
 
 
@@ -236,7 +312,12 @@ def render_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -> str
     return "\n".join(lines) + "\n"
 
 
-def render_html_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -> str:
+def render_html_dashboard(
+        repos: List[RepoStatus],
+        root: Path,
+        max_depth: int,
+        auto_refresh_sec: int,
+) -> str:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         total = len(repos)
         dirty = len([r for r in repos if r.has_changes])
@@ -245,6 +326,7 @@ def render_html_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -
 
         rows_json = json.dumps([to_row(r) for r in repos], ensure_ascii=False)
         root_text = escape(str(root))
+        default_refresh = max(auto_refresh_sec, 0)
 
         return f"""<!doctype html>
 <html lang=\"es\">
@@ -256,12 +338,12 @@ def render_html_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -
         :root {{
             --bg: #f6f7f9;
             --surface: #ffffff;
-            --ink: #1a1f2c;
-            --muted: #5b667a;
-            --ok: #2f8f4e;
-            --warn: #d27a00;
+            --ink: #162033;
+            --muted: #56637a;
+            --ok: #1f7a46;
+            --warn: #b86b00;
             --bad: #b42318;
-            --line: #dbe1ea;
+            --line: #d8e0ea;
             --shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
         }}
 
@@ -269,221 +351,368 @@ def render_html_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -
         body {{
             margin: 0;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: radial-gradient(circle at 15% -10%, #e3f2fd, transparent 30%),
-                                    radial-gradient(circle at 90% -5%, #ffe8c7, transparent 25%),
+            background: radial-gradient(circle at 10% -8%, #dcefff, transparent 30%),
+                                    radial-gradient(circle at 92% -8%, #ffeccf, transparent 24%),
                                     var(--bg);
             color: var(--ink);
         }}
 
-        .wrap {{ max-width: 1400px; margin: 0 auto; padding: 20px; }}
+        .wrap {{ max-width: 1600px; margin: 0 auto; padding: 18px; }}
         .header {{
             background: var(--surface);
             border: 1px solid var(--line);
-            box-shadow: var(--shadow);
             border-radius: 14px;
-            padding: 16px 18px;
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
         }}
-        h1 {{ margin: 0 0 6px; font-size: 1.5rem; }}
-        .meta {{ color: var(--muted); font-size: 0.92rem; }}
+        .header h1 {{ margin: 0; font-size: 1.3rem; }}
+        .meta {{ margin-top: 5px; color: var(--muted); font-size: 0.9rem; }}
 
-        .kpis {{
-            margin-top: 14px;
-            display: grid;
-            grid-template-columns: repeat(4, minmax(130px, 1fr));
-            gap: 10px;
-        }}
-        .kpi {{
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: 12px;
-            padding: 10px 12px;
-        }}
-        .kpi .n {{ font-size: 1.4rem; font-weight: 700; }}
-        .kpi .l {{ color: var(--muted); font-size: 0.82rem; }}
+        .kpis {{ margin-top: 12px; display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }}
+        .kpi {{ background: #fbfcfe; border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; }}
+        .kpi .n {{ font-size: 1.35rem; font-weight: 700; }}
+        .kpi .l {{ color: var(--muted); font-size: 0.8rem; }}
 
         .toolbar {{
-            margin-top: 14px;
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: 12px;
-            padding: 12px;
+            margin-top: 12px;
             display: grid;
             grid-template-columns: 1fr auto;
             gap: 12px;
-            align-items: center;
-        }}
-        .toolbar input[type=\"search\"] {{
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid var(--line);
-            border-radius: 10px;
-            font-size: 0.95rem;
-        }}
-        .checks {{ display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 0.9rem; }}
-
-        .table-wrap {{
-            margin-top: 14px;
             background: var(--surface);
             border: 1px solid var(--line);
             border-radius: 12px;
-            overflow: auto;
+            padding: 10px;
+        }}
+        .toolbar input[type=\"search\"] {{
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: 10px;
+            font-size: 0.93rem;
+        }}
+        .checks {{ display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 0.86rem; align-items: center; }}
+
+        .layout {{
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: 320px 1fr 420px;
+            gap: 12px;
+            min-height: 72vh;
+        }}
+        .panel {{
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
             box-shadow: var(--shadow);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 240px;
         }}
-        table {{ width: 100%; border-collapse: collapse; min-width: 1050px; }}
-        th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #edf1f7; vertical-align: top; }}
-        th {{
-            position: sticky;
-            top: 0;
-            z-index: 1;
-            background: #f1f4f9;
-            font-size: 0.84rem;
-            letter-spacing: 0.02em;
+        .panel-title {{
+            padding: 10px 12px;
+            font-size: 0.83rem;
             text-transform: uppercase;
+            letter-spacing: 0.03em;
             color: #344054;
-            cursor: pointer;
-            user-select: none;
+            border-bottom: 1px solid #edf1f7;
+            background: #f7f9fc;
         }}
-        tr:hover td {{ background: #f9fbff; }}
+        .panel-body {{ padding: 10px; overflow: auto; flex: 1; }}
+
+        .repo-item {{
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            margin-bottom: 6px;
+            cursor: pointer;
+            background: #fbfcfe;
+        }}
+        .repo-item:hover {{ border-color: #d6e2f3; background: #f7fbff; }}
+        .repo-item.active {{ border-color: #77a5e8; background: #eef5ff; }}
+        .repo-name {{ font-size: 0.9rem; font-weight: 600; }}
+        .repo-meta {{ margin-top: 3px; color: var(--muted); font-size: 0.78rem; }}
 
         .badge {{
             display: inline-block;
             border-radius: 999px;
-            padding: 3px 8px;
-            font-size: 0.75rem;
+            padding: 2px 7px;
+            font-size: 0.74rem;
             border: 1px solid var(--line);
             background: #fff;
             color: var(--muted);
+            margin-right: 4px;
         }}
-        .state-ok {{ color: var(--ok); border-color: #b2dfc0; background: #effbf3; }}
-        .state-warn {{ color: var(--warn); border-color: #f6d39d; background: #fff8eb; }}
-        .state-bad {{ color: var(--bad); border-color: #f2b3ad; background: #fff2f1; }}
+        .state-ok {{ color: var(--ok); border-color: #add9bc; background: #effbf3; }}
+        .state-warn {{ color: var(--warn); border-color: #f5d8a9; background: #fff8ec; }}
+        .state-bad {{ color: var(--bad); border-color: #efb2ae; background: #fff2f1; }}
 
-        .footer {{ margin: 12px 0 4px; color: var(--muted); font-size: 0.82rem; }}
-
-        @media (max-width: 880px) {{
-            .kpis {{ grid-template-columns: repeat(2, minmax(130px, 1fr)); }}
-            .toolbar {{ grid-template-columns: 1fr; }}
+        .graph {{
+            margin-top: 6px;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 0.78rem;
+            background: #0f1524;
+            color: #e5edff;
+            border-radius: 8px;
+            padding: 8px;
+            max-height: 220px;
+            overflow: auto;
+            white-space: pre;
         }}
+
+        .commit-item {{
+            border: 1px solid #e8edf5;
+            border-radius: 8px;
+            padding: 8px;
+            margin-top: 8px;
+            cursor: pointer;
+            background: #fff;
+        }}
+        .commit-item.active {{ border-color: #79a8eb; background: #f2f7ff; }}
+        .commit-head {{ font-family: Consolas, 'Courier New', monospace; font-size: 0.8rem; color: #334155; }}
+        .commit-subj {{ margin-top: 2px; font-size: 0.86rem; }}
+        .commit-meta {{ margin-top: 2px; color: var(--muted); font-size: 0.75rem; }}
+
+        .files-list {{ margin-top: 8px; font-family: Consolas, 'Courier New', monospace; font-size: 0.78rem; }}
+        .file-row {{ padding: 2px 0; border-bottom: 1px dashed #eff2f7; }}
+
+        .footer {{ margin-top: 8px; color: var(--muted); font-size: 0.8rem; }}
+
+        @media (max-width: 1280px) {{ .layout {{ grid-template-columns: 280px 1fr; }} .panel.right {{ grid-column: 1 / -1; }} }}
+        @media (max-width: 860px) {{ .kpis {{ grid-template-columns: repeat(2, minmax(120px, 1fr)); }} .layout {{ grid-template-columns: 1fr; }} .toolbar {{ grid-template-columns: 1fr; }} }}
     </style>
 </head>
 <body>
     <div class=\"wrap\">
         <section class=\"header\">
-            <h1>Git Workspace Global Viewer (Read-Only)</h1>
+            <h1>Git Workspace Global Viewer - Read Only</h1>
             <div class=\"meta\">Workspace: {root_text} | Profundidad: {max_depth} | Generado: {escape(now)}</div>
             <div class=\"kpis\">
-                <div class=\"kpi\"><div class=\"n\">{total}</div><div class=\"l\">Repos detectados</div></div>
-                <div class=\"kpi\"><div class=\"n\">{dirty}</div><div class=\"l\">Con cambios locales</div></div>
-                <div class=\"kpi\"><div class=\"n\">{detached}</div><div class=\"l\">Detached HEAD</div></div>
-                <div class=\"kpi\"><div class=\"n\">{stale}</div><div class=\"l\">Potencialmente desactualizados</div></div>
+                <div class=\"kpi\"><div class=\"n\">{total}</div><div class=\"l\">Repos</div></div>
+                <div class=\"kpi\"><div class=\"n\">{dirty}</div><div class=\"l\">Con cambios</div></div>
+                <div class=\"kpi\"><div class=\"n\">{detached}</div><div class=\"l\">Detached</div></div>
+                <div class=\"kpi\"><div class=\"n\">{stale}</div><div class=\"l\">Stale</div></div>
             </div>
         </section>
 
         <section class=\"toolbar\">
-            <input id=\"search\" type=\"search\" placeholder=\"Buscar repo, rama, commit o estado...\" />
+            <input id=\"search\" type=\"search\" placeholder=\"Buscar repo/rama/commit...\" />
             <div class=\"checks\">
-                <label><input id=\"f-dirty\" type=\"checkbox\" /> Solo con cambios</label>
+                <label><input id=\"f-dirty\" type=\"checkbox\" /> Solo cambios</label>
                 <label><input id=\"f-detached\" type=\"checkbox\" /> Solo detached</label>
-                <label><input id=\"f-stale\" type=\"checkbox\" /> Solo desactualizados</label>
+                <label><input id=\"f-stale\" type=\"checkbox\" /> Solo stale</label>
+                <label><input id=\"f-autorefresh\" type=\"checkbox\" /> Auto-refresh</label>
+                <select id=\"refresh-sec\">
+                    <option value=\"15\">15s</option>
+                    <option value=\"30\">30s</option>
+                    <option value=\"60\">60s</option>
+                    <option value=\"120\">120s</option>
+                </select>
             </div>
         </section>
 
-        <section class=\"table-wrap\">
-            <table id=\"repos-table\">
-                <thead>
-                    <tr>
-                        <th data-key=\"name\">Repositorio</th>
-                        <th data-key=\"branch\">Rama Actual</th>
-                        <th data-key=\"sync_remote\">Sync Remoto</th>
-                        <th data-key=\"local_changes\">Cambios Locales</th>
-                        <th data-key=\"last_commit\">Ultimo Commit</th>
-                        <th data-key=\"flags\">Alertas</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+        <section class=\"layout\">
+            <article class=\"panel\">
+                <div class=\"panel-title\">Repositorios</div>
+                <div class=\"panel-body\" id=\"repo-list\"></div>
+            </article>
+
+            <article class=\"panel\">
+                <div class=\"panel-title\" id=\"middle-title\">Timeline</div>
+                <div class=\"panel-body\">
+                    <div id=\"repo-summary\"></div>
+                    <div class=\"graph\" id=\"graph-view\">Sin historial</div>
+                    <div id=\"commit-list\"></div>
+                </div>
+            </article>
+
+            <article class=\"panel right\">
+                <div class=\"panel-title\">Detalle Commit</div>
+                <div class=\"panel-body\" id=\"commit-detail\">Selecciona un commit para ver detalle.</div>
+            </article>
         </section>
 
-        <div class=\"footer\">Modo solo lectura: no se ejecutan operaciones mutantes de Git.</div>
+        <div class=\"footer\">Modo visor: no hay acciones mutantes de Git (add/commit/push/checkout).</div>
     </div>
 
     <script>
-        const rows = {rows_json};
-        const tableBody = document.querySelector('#repos-table tbody');
-        const searchInput = document.getElementById('search');
-        const dirtyFilter = document.getElementById('f-dirty');
-        const detachedFilter = document.getElementById('f-detached');
-        const staleFilter = document.getElementById('f-stale');
+        const repos = {rows_json};
+        const state = {{ selectedRepo: repos[0]?.name ?? null, selectedCommitByRepo: {{}} }};
+        let refreshTimer = null;
 
-        let sortKey = 'name';
-        let sortAsc = true;
+        const el = {{
+            repoList: document.getElementById('repo-list'),
+            repoSummary: document.getElementById('repo-summary'),
+            graphView: document.getElementById('graph-view'),
+            commitList: document.getElementById('commit-list'),
+            commitDetail: document.getElementById('commit-detail'),
+            middleTitle: document.getElementById('middle-title'),
+            search: document.getElementById('search'),
+            dirty: document.getElementById('f-dirty'),
+            detached: document.getElementById('f-detached'),
+            stale: document.getElementById('f-stale'),
+            auto: document.getElementById('f-autorefresh'),
+            refreshSec: document.getElementById('refresh-sec'),
+        }};
 
-        function badgeForSync(text) {{
-            const t = text.toLowerCase();
-            if (t.includes('up to date')) return '<span class="badge state-ok">Up to date</span>';
-            if (t.includes('ahead') || t.includes('behind') || t.includes('diverged')) return `<span class="badge state-warn">${{text}}</span>`;
-            return `<span class="badge">${{text}}</span>`;
+        el.refreshSec.value = String({default_refresh} || 30);
+        if ({default_refresh} > 0) {{ el.auto.checked = true; }}
+
+        function badge(text, klass='') {{ return `<span class=\"badge ${{klass}}\">${{text}}</span>`; }}
+
+        function badgeSync(text) {{
+            const t = String(text).toLowerCase();
+            if (t.includes('up to date')) return badge('Up to date', 'state-ok');
+            if (t.includes('ahead') || t.includes('behind') || t.includes('diverged')) return badge(text, 'state-warn');
+            return badge(text);
         }}
 
-        function badgeForChanges(row) {{
-            if (!row.has_changes) return '<span class="badge state-ok">🟢 Limpio</span>';
-            return `<span class="badge state-bad">${{row.local_changes}}</span>`;
+        function badgeChanges(r) {{
+            if (!r.has_changes) return badge('🟢 Limpio', 'state-ok');
+            return badge(r.local_changes, 'state-bad');
         }}
 
-        function flags(row) {{
-            const out = [];
-            if (row.is_detached) out.push('<span class="badge state-bad">Detached</span>');
-            if (row.is_stale) out.push('<span class="badge state-warn">Stale</span>');
-            if (!row.is_detached && !row.is_stale) out.push('<span class="badge state-ok">OK</span>');
-            return out.join(' ');
+        function searchableText(r) {{
+            const commitsText = (r.recent_commits || []).map(c => `${{c.hash}} ${{c.subject}} ${{c.author}}`).join(' ');
+            return `${{r.name}} ${{r.branch}} ${{r.sync_remote}} ${{r.local_changes}} ${{r.last_commit}} ${{commitsText}}`.toLowerCase();
         }}
 
-        function getText(row) {{
-            return [row.name, row.branch, row.sync_remote, row.local_changes, row.last_commit].join(' ').toLowerCase();
+        function filteredRepos() {{
+            const q = el.search.value.trim().toLowerCase();
+            return repos
+                .filter(r => !q || searchableText(r).includes(q))
+                .filter(r => !el.dirty.checked || r.has_changes)
+                .filter(r => !el.detached.checked || r.is_detached)
+                .filter(r => !el.stale.checked || r.is_stale)
+                .sort((a, b) => a.name.localeCompare(b.name));
+        }}
+
+        function selectRepo(name) {{ state.selectedRepo = name; render(); }}
+
+        function selectCommit(repoName, hash) {{
+            state.selectedCommitByRepo[repoName] = hash;
+            renderCommitDetail();
+            renderCommitList();
+        }}
+
+        function getSelectedRepo() {{
+            const list = filteredRepos();
+            if (!list.length) return null;
+            const exists = list.some(r => r.name === state.selectedRepo);
+            if (!exists) state.selectedRepo = list[0].name;
+            return list.find(r => r.name === state.selectedRepo) || list[0];
+        }}
+
+        function renderRepoList() {{
+            const list = filteredRepos();
+            if (!list.length) {{
+                el.repoList.innerHTML = '<div class=\"repo-meta\">No hay repos para los filtros actuales.</div>';
+                return;
+            }}
+            el.repoList.innerHTML = list.map(r => {{
+                const flags = [badgeSync(r.sync_remote), badgeChanges(r)];
+                if (r.is_detached) flags.push(badge('Detached', 'state-bad'));
+                if (r.is_stale) flags.push(badge('Stale', 'state-warn'));
+                const cls = r.name === state.selectedRepo ? 'repo-item active' : 'repo-item';
+                return `<div class=\"${{cls}}\" data-repo=\"${{r.name}}\">\
+                    <div class=\"repo-name\">${{r.name}}</div>\
+                    <div class=\"repo-meta\">Rama: ${{r.branch}}</div>\
+                    <div class=\"repo-meta\">${{flags.join(' ')}}</div>\
+                </div>`;
+            }}).join('');
+
+            el.repoList.querySelectorAll('.repo-item').forEach(node => {{
+                node.addEventListener('click', () => selectRepo(node.getAttribute('data-repo')));
+            }});
+        }}
+
+        function renderTimeline() {{
+            const repo = getSelectedRepo();
+            if (!repo) {{
+                el.middleTitle.textContent = 'Timeline';
+                el.repoSummary.innerHTML = '';
+                el.graphView.textContent = 'Sin datos';
+                el.commitList.innerHTML = '';
+                el.commitDetail.innerHTML = 'Sin datos';
+                return;
+            }}
+
+            el.middleTitle.textContent = `Timeline: ${{repo.name}}`;
+            el.repoSummary.innerHTML = `<div class=\"repo-meta\">Rama actual: <b>${{repo.branch}}</b> | ${{badgeSync(repo.sync_remote)}} ${{badgeChanges(repo)}}</div>`;
+            el.graphView.textContent = (repo.history_graph || []).join('\n') || 'Sin historial disponible';
+
+            const commits = repo.recent_commits || [];
+            if (!state.selectedCommitByRepo[repo.name] && commits.length) {{
+                state.selectedCommitByRepo[repo.name] = commits[0].hash;
+            }}
+
+            el.commitList.innerHTML = commits.map(c => {{
+                const active = state.selectedCommitByRepo[repo.name] === c.hash ? 'commit-item active' : 'commit-item';
+                return `<div class=\"${{active}}\" data-h=\"${{c.hash}}\">\
+                    <div class=\"commit-head\">${{c.hash}}</div>\
+                    <div class=\"commit-subj\">${{c.subject}}</div>\
+                    <div class=\"commit-meta\">${{c.author}} - ${{c.rel_time}}</div>\
+                </div>`;
+            }}).join('') || '<div class=\"repo-meta\">Sin commits.</div>';
+
+            el.commitList.querySelectorAll('.commit-item').forEach(node => {{
+                node.addEventListener('click', () => selectCommit(repo.name, node.getAttribute('data-h')));
+            }});
+        }}
+
+        function renderCommitList() {{
+            const repo = getSelectedRepo();
+            if (!repo) return;
+            const selected = state.selectedCommitByRepo[repo.name] || '';
+            el.commitList.querySelectorAll('.commit-item').forEach(item => {{
+                item.classList.toggle('active', item.getAttribute('data-h') === selected);
+            }});
+        }}
+
+        function renderCommitDetail() {{
+            const repo = getSelectedRepo();
+            if (!repo) {{ el.commitDetail.innerHTML = 'Sin datos'; return; }}
+
+            const commits = repo.recent_commits || [];
+            const selectedHash = state.selectedCommitByRepo[repo.name];
+            const commit = commits.find(c => c.hash === selectedHash) || commits[0];
+            if (!commit) {{ el.commitDetail.innerHTML = 'Sin commits para este repositorio.'; return; }}
+
+            const refs = commit.refs ? `<div class=\"repo-meta\">Refs: ${{commit.refs}}</div>` : '';
+            const files = (commit.files || []).map(f => `<div class=\"file-row\">${{f}}</div>`).join('');
+            const more = commit.files_total > (commit.files || []).length
+                ? `<div class=\"repo-meta\">... y ${{commit.files_total - (commit.files || []).length}} archivo(s) mas</div>`
+                : '';
+
+            el.commitDetail.innerHTML = `
+                <div class=\"commit-head\">${{commit.hash}} <span class=\"repo-meta\">(${{commit.full_hash}})</span></div>
+                <div class=\"commit-subj\">${{commit.subject}}</div>
+                <div class=\"commit-meta\">Autor: ${{commit.author}} | Fecha: ${{commit.rel_time}}</div>
+                ${{refs}}
+                <div class=\"files-list\">${{files || '<div class=\"repo-meta\">Sin archivos detectados para este commit.</div>'}}</div>
+                ${{more}}
+            `;
+        }}
+
+        function setupAutoRefresh() {{
+            if (refreshTimer) {{ clearInterval(refreshTimer); refreshTimer = null; }}
+            if (!el.auto.checked) return;
+            const seconds = parseInt(el.refreshSec.value, 10) || 30;
+            refreshTimer = setInterval(() => window.location.reload(), Math.max(seconds, 10) * 1000);
         }}
 
         function render() {{
-            const q = searchInput.value.trim().toLowerCase();
-            const filtered = rows
-                .filter(r => !q || getText(r).includes(q))
-                .filter(r => !dirtyFilter.checked || r.has_changes)
-                .filter(r => !detachedFilter.checked || r.is_detached)
-                .filter(r => !staleFilter.checked || r.is_stale)
-                .sort((a, b) => {{
-                    const av = String(a[sortKey] ?? '').toLowerCase();
-                    const bv = String(b[sortKey] ?? '').toLowerCase();
-                    if (av < bv) return sortAsc ? -1 : 1;
-                    if (av > bv) return sortAsc ? 1 : -1;
-                    return 0;
-                }});
-
-            tableBody.innerHTML = filtered.map(row => `
-                <tr>
-                    <td>${{row.name}}</td>
-                    <td>${{row.branch}}</td>
-                    <td>${{badgeForSync(row.sync_remote)}}</td>
-                    <td>${{badgeForChanges(row)}}</td>
-                    <td>${{row.last_commit}}</td>
-                    <td>${{flags(row)}}</td>
-                </tr>
-            `).join('');
+            renderRepoList();
+            renderTimeline();
+            renderCommitDetail();
         }}
 
-        searchInput.addEventListener('input', render);
-        dirtyFilter.addEventListener('change', render);
-        detachedFilter.addEventListener('change', render);
-        staleFilter.addEventListener('change', render);
-
-        document.querySelectorAll('th[data-key]').forEach(th => {{
-            th.addEventListener('click', () => {{
-                const key = th.getAttribute('data-key');
-                if (sortKey === key) sortAsc = !sortAsc;
-                else {{ sortKey = key; sortAsc = true; }}
-                render();
-            }});
-        }});
+        [el.search, el.dirty, el.detached, el.stale].forEach(node => node.addEventListener('input', render));
+        el.auto.addEventListener('change', setupAutoRefresh);
+        el.refreshSec.addEventListener('change', setupAutoRefresh);
 
         render();
+        setupAutoRefresh();
     </script>
 </body>
 </html>
@@ -494,6 +723,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Global Git workspace read-only viewer")
     parser.add_argument("--root", default=".", help="Workspace root path to scan")
     parser.add_argument("--max-depth", type=int, default=3, help="Max folder depth for .git discovery")
+    parser.add_argument("--graph-limit", type=int, default=25, help="Max graph lines per repo in HTML")
+    parser.add_argument("--commit-limit", type=int, default=8, help="Max recent commits per repo in HTML")
+    parser.add_argument("--commit-files-limit", type=int, default=12, help="Max changed files shown per commit")
+    parser.add_argument("--auto-refresh-sec", type=int, default=0, help="Default HTML auto-refresh in seconds (0 disables)")
     parser.add_argument("--output", default="dashboard/global-git-dashboard.md", help="Markdown output file")
     parser.add_argument(
         "--html-output",
@@ -510,9 +743,18 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     repos = discover_repos(root, args.max_depth)
-    statuses = [collect_repo_status(repo, root) for repo in repos]
+    statuses = [
+        collect_repo_status(
+            repo,
+            root,
+            graph_limit=args.graph_limit,
+            commit_limit=args.commit_limit,
+            commit_files_limit=args.commit_files_limit,
+        )
+        for repo in repos
+    ]
     md_dashboard = render_dashboard(statuses, root, args.max_depth)
-    html_dashboard = render_html_dashboard(statuses, root, args.max_depth)
+    html_dashboard = render_html_dashboard(statuses, root, args.max_depth, args.auto_refresh_sec)
 
     if args.mode in {"md", "both"}:
         output_path = Path(args.output)

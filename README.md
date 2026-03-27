@@ -20,7 +20,7 @@ python scripts/git-global-viewer.py --root "C:/Users/artur/development" --max-de
 Genera Markdown + HTML interactivo en una sola ejecucion:
 
 ```powershell
-python scripts/git-global-viewer.py --root "C:/Users/artur/development" --max-depth 3 --mode both --output dashboard/global-git-dashboard.md --html-output dashboard/global-git-dashboard.html
+python scripts/git-global-viewer.py --root "C:/Users/artur/development" --max-depth 3 --mode both --graph-limit 25 --commit-limit 8 --commit-files-limit 12 --output dashboard/global-git-dashboard.md --html-output dashboard/global-git-dashboard.html
 ```
 
 Abrir visor HTML:
@@ -53,10 +53,20 @@ Tabla Markdown con:
 
 Vista HTML con:
 
+- Layout de 3 paneles: repos, timeline/grafo, detalle de commit
 - Filtro por texto (repo/rama/commit/estado)
 - Filtros rapidos: cambios, detached, stale
-- Orden por columnas
+- Grafo de commits por repositorio (vista tipo cliente Git)
+- Detalle de commit con archivos cambiados (read-only)
+- Auto-refresh opcional (recarga de visor)
 - Tarjetas KPI globales
+
+## Opciones clave
+
+- `--graph-limit`: lineas maximas de grafo por repo en HTML
+- `--commit-limit`: commits recientes por repo para el panel de detalle
+- `--commit-files-limit`: archivos maximos mostrados por commit
+- `--auto-refresh-sec`: activa auto-refresh por defecto en HTML (0 deshabilita)
 
 Y una seccion de alertas para:
 
