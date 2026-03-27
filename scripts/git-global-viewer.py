@@ -10,6 +10,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from html import escape
@@ -18,6 +19,12 @@ from typing import Any, Dict, List, Optional
 
 IGNORED_DIRS = {"node_modules", "vendor", ".venv", "dist", "build"}
 STALE_DAYS = 90
+SECRET_PATTERNS = [
+    re.compile(r"ATATT[A-Za-z0-9_-]{10,}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}", re.IGNORECASE),
+    re.compile(r"(?i)(authorization\s*[:=]\s*)(bearer\s+)?([A-Za-z0-9._-]{12,})"),
+    re.compile(r"(?i)((api[_-]?key|api[_-]?token|token|password|passwd|secret)\s*[:=]\s*['\"]?)([^\s'\"\\]+)"),
+]
 
 
 @dataclass
@@ -54,7 +61,7 @@ def to_row(repo: RepoStatus) -> Dict[str, Any]:
 
 def run_git(repo: Path, args: List[str]) -> tuple[int, str]:
     cmd = ["git", "-C", str(repo), *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     return proc.returncode, out if out else err
@@ -188,7 +195,83 @@ def collect_history_graph(repo: Path, limit: int) -> List[str]:
     return out.splitlines()
 
 
-def collect_recent_commits(repo: Path, limit: int, files_limit: int) -> List[Dict[str, Any]]:
+def parse_changed_files(name_status_output: str, files_limit: int) -> tuple[List[Dict[str, str]], int]:
+    files: List[Dict[str, str]] = []
+    total = 0
+    for fline in name_status_output.splitlines():
+        raw = fline.strip()
+        if not raw:
+            continue
+
+        fp = raw.split("\t")
+        status = fp[0] if fp else "?"
+        path = fp[-1] if len(fp) >= 2 else raw
+        display = f"{status} {path}" if len(fp) >= 2 else raw
+
+        total += 1
+        if len(files) >= files_limit:
+            continue
+
+        files.append(
+            {
+                "status": status,
+                "path": path,
+                "display": display,
+            }
+        )
+    return files, total
+
+
+def collect_file_patch(
+    repo: Path,
+    commit_hash: str,
+    file_path: str,
+    diff_unified: int,
+    diff_max_lines: int,
+    diff_max_chars: int,
+) -> str:
+    code, out = run_git(
+        repo,
+        [
+            "show",
+            "--pretty=format:",
+            f"--unified={diff_unified}",
+            commit_hash,
+            "--",
+            file_path,
+        ],
+    )
+    if code != 0 or not out:
+        return "Diff no disponible para este archivo."
+
+    for pattern in SECRET_PATTERNS:
+        out = pattern.sub(lambda m: f"{m.group(1) if m.lastindex and m.lastindex >= 1 else ''}[REDACTED]", out)
+
+    lines = out.splitlines()
+    truncated_by_lines = False
+    if len(lines) > diff_max_lines:
+        lines = lines[:diff_max_lines]
+        truncated_by_lines = True
+
+    patch = "\n".join(lines)
+    truncated_by_chars = False
+    if len(patch) > diff_max_chars:
+        patch = patch[:diff_max_chars]
+        truncated_by_chars = True
+
+    if truncated_by_lines or truncated_by_chars:
+        patch += "\n\n... (diff truncado para mantener el visor rapido)"
+    return patch
+
+
+def collect_recent_commits(
+    repo: Path,
+    limit: int,
+    files_limit: int,
+    diff_unified: int,
+    diff_max_lines: int,
+    diff_max_chars: int,
+) -> List[Dict[str, Any]]:
     code, out = run_git(
         repo,
         [
@@ -213,17 +296,21 @@ def collect_recent_commits(repo: Path, limit: int, files_limit: int) -> List[Dic
             repo,
             ["show", "--name-status", "--pretty=format:", "--max-count=1", full_hash],
         )
-        changed_files: List[str] = []
+
+        changed_files: List[Dict[str, str]] = []
+        files_total = 0
         if code_files == 0 and files_out:
-            for fline in files_out.splitlines():
-                raw = fline.strip()
-                if not raw:
-                    continue
-                fp = raw.split("\t")
-                if len(fp) >= 2:
-                    changed_files.append(f"{fp[0]} {fp[-1]}")
-                else:
-                    changed_files.append(raw)
+            changed_files, files_total = parse_changed_files(files_out, files_limit)
+
+        for entry in changed_files:
+            entry["patch"] = collect_file_patch(
+                repo,
+                full_hash,
+                entry["path"],
+                diff_unified,
+                diff_max_lines,
+                diff_max_chars,
+            )
 
         commits.append(
             {
@@ -233,8 +320,8 @@ def collect_recent_commits(repo: Path, limit: int, files_limit: int) -> List[Dic
                 "rel_time": rel_time,
                 "subject": subject,
                 "refs": refs.strip(),
-                "files": changed_files[:files_limit],
-                "files_total": len(changed_files),
+                "files": changed_files,
+                "files_total": files_total,
             }
         )
     return commits
@@ -246,13 +333,23 @@ def collect_repo_status(
     graph_limit: int,
     commit_limit: int,
     commit_files_limit: int,
+    diff_unified: int,
+    diff_max_lines: int,
+    diff_max_chars: int,
 ) -> RepoStatus:
     branch, is_detached = branch_state(repo)
     sync_remote_state = sync_state(repo)
     local_changes, has_changes = working_tree(repo)
     latest_commit, is_stale, last_activity_ts = last_commit(repo)
     history_graph = collect_history_graph(repo, graph_limit)
-    recent_commits = collect_recent_commits(repo, commit_limit, commit_files_limit)
+    recent_commits = collect_recent_commits(
+        repo,
+        commit_limit,
+        commit_files_limit,
+        diff_unified,
+        diff_max_lines,
+        diff_max_chars,
+    )
 
     display_name = str(repo.relative_to(root)).replace("\\", "/")
     return RepoStatus(
@@ -318,22 +415,22 @@ def render_dashboard(repos: List[RepoStatus], root: Path, max_depth: int) -> str
 
 
 def render_html_dashboard(
-        repos: List[RepoStatus],
-        root: Path,
-        max_depth: int,
-        auto_refresh_sec: int,
+    repos: List[RepoStatus],
+    root: Path,
+    max_depth: int,
+    auto_refresh_sec: int,
 ) -> str:
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        total = len(repos)
-        dirty = len([r for r in repos if r.has_changes])
-        detached = len([r for r in repos if r.is_detached])
-        stale = len([r for r in repos if r.is_stale])
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total = len(repos)
+    dirty = len([r for r in repos if r.has_changes])
+    detached = len([r for r in repos if r.is_detached])
+    stale = len([r for r in repos if r.is_stale])
 
-        rows_json = json.dumps([to_row(r) for r in repos], ensure_ascii=False)
-        root_text = escape(str(root))
-        default_refresh = max(auto_refresh_sec, 0)
+    rows_json = json.dumps([to_row(r) for r in repos], ensure_ascii=False)
+    root_text = escape(str(root))
+    default_refresh = max(auto_refresh_sec, 0)
 
-        return f"""<!doctype html>
+    return f"""<!doctype html>
 <html lang=\"es\">
 <head>
     <meta charset=\"utf-8\" />
@@ -545,12 +642,39 @@ def render_html_dashboard(
         .commit-meta {{ margin-top: 2px; color: var(--muted); font-size: 0.75rem; }}
 
         .files-list {{ margin-top: 8px; font-family: Consolas, 'Courier New', monospace; font-size: 0.78rem; }}
-        .file-row {{ padding: 2px 0; border-bottom: 1px dashed var(--line); }}
+        .file-row {{
+            padding: 5px 7px;
+            border: 1px solid transparent;
+            border-bottom: 1px dashed var(--line);
+            border-radius: 6px;
+            cursor: pointer;
+            min-height: 36px;
+            display: flex;
+            align-items: center;
+        }}
+        .file-row:hover {{ background: var(--repo-hover); border-color: var(--line); }}
+        .file-row.active {{ background: var(--repo-active); border-color: var(--repo-active-border); }}
+        .diff-title {{ margin-top: 8px; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }}
+        .diff-block {{
+            margin-top: 6px;
+            background: var(--graph-bg);
+            color: var(--graph-ink);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 9px;
+            max-height: 320px;
+            overflow: auto;
+            white-space: pre;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 0.76rem;
+            line-height: 1.45;
+        }}
 
         input:focus-visible,
         select:focus-visible,
         .repo-item:focus-visible,
-        .commit-item:focus-visible {{
+        .commit-item:focus-visible,
+        .file-row:focus-visible {{
             outline: 3px solid var(--repo-active-border);
             outline-offset: 2px;
         }}
@@ -618,7 +742,7 @@ def render_html_dashboard(
 
     <script>
         const repos = {rows_json};
-        const state = {{ selectedRepo: repos[0]?.name ?? null, selectedCommitByRepo: {{}} }};
+        const state = {{ selectedRepo: repos[0]?.name ?? null, selectedCommitByRepo: {{}}, selectedFileByCommit: {{}} }};
         let refreshTimer = null;
 
         const el = {{
@@ -681,7 +805,9 @@ def render_html_dashboard(
         }}
 
         function searchableText(r) {{
-            const commitsText = (r.recent_commits || []).map(c => `${{c.hash}} ${{c.subject}} ${{c.author}}`).join(' ');
+            const commitsText = (r.recent_commits || [])
+                .map(c => `${{c.hash}} ${{c.subject}} ${{c.author}} ${{(c.files || []).map(f => f.display || '').join(' ')}}`)
+                .join(' ');
             return `${{r.name}} ${{r.branch}} ${{r.sync_remote}} ${{r.local_changes}} ${{r.last_commit}} ${{commitsText}}`.toLowerCase();
         }}
 
@@ -706,6 +832,15 @@ def render_html_dashboard(
             state.selectedCommitByRepo[repoName] = hash;
             renderCommitDetail();
             renderCommitList();
+        }}
+
+        function commitKey(repoName, commitHash) {{
+            return `${{repoName}}::${{commitHash}}`;
+        }}
+
+        function selectFile(repoName, commitHash, filePath) {{
+            state.selectedFileByCommit[commitKey(repoName, commitHash)] = filePath;
+            renderCommitDetail();
         }}
 
         function getSelectedRepo() {{
@@ -804,9 +939,28 @@ def render_html_dashboard(
             if (!commit) {{ el.commitDetail.innerHTML = 'Sin commits para este repositorio.'; return; }}
 
             const refs = commit.refs ? `<div class=\"repo-meta\">Refs: ${{esc(commit.refs)}}</div>` : '';
-            const files = (commit.files || []).map(f => `<div class=\"file-row\">${{esc(f)}}</div>`).join('');
-            const more = commit.files_total > (commit.files || []).length
-                ? `<div class=\"repo-meta\">... y ${{commit.files_total - (commit.files || []).length}} archivo(s) mas</div>`
+            const files = commit.files || [];
+            const key = commitKey(repo.name, commit.hash);
+            if (!state.selectedFileByCommit[key] && files.length) {{
+                state.selectedFileByCommit[key] = files[0].path;
+            }}
+            const selectedFilePath = state.selectedFileByCommit[key] || '';
+
+            const filesHtml = files.map((f, idx) => {{
+                const active = f.path === selectedFilePath ? 'file-row active' : 'file-row';
+                return `<div class=\"${{active}}\" role=\"button\" tabindex=\"0\" data-file-index=\"${{idx}}\">${{esc(f.display || f.path || '')}}</div>`;
+            }}).join('');
+
+            const selectedFile = files.find(f => f.path === selectedFilePath) || files[0] || null;
+            const diffTitle = selectedFile
+                ? `<div class=\"diff-title\">Diff: ${{esc(selectedFile.path || '')}}</div>`
+                : '<div class=\"diff-title\">Diff</div>';
+            const diffBody = selectedFile
+                ? `<pre class=\"diff-block\">${{esc(selectedFile.patch || 'Diff no disponible para este archivo.')}}</pre>`
+                : '<div class=\"repo-meta\">Selecciona un archivo para ver su diff.</div>';
+
+            const more = commit.files_total > files.length
+                ? `<div class=\"repo-meta\">... y ${{commit.files_total - files.length}} archivo(s) mas</div>`
                 : '';
 
             el.commitDetail.innerHTML = `
@@ -814,9 +968,27 @@ def render_html_dashboard(
                 <div class=\"commit-subj\">${{esc(commit.subject)}}</div>
                 <div class=\"commit-meta\">Autor: ${{esc(commit.author)}} | Fecha: ${{esc(commit.rel_time)}}</div>
                 ${{refs}}
-                <div class=\"files-list\">${{files || '<div class=\"repo-meta\">Sin archivos detectados para este commit.</div>'}}</div>
+                <div class=\"files-list\">${{filesHtml || '<div class=\"repo-meta\">Sin archivos detectados para este commit.</div>'}}</div>
                 ${{more}}
+                ${{diffTitle}}
+                ${{diffBody}}
             `;
+
+            el.commitDetail.querySelectorAll('.file-row').forEach(node => {{
+                node.addEventListener('click', () => {{
+                    const idx = Number(node.getAttribute('data-file-index'));
+                    const file = files[idx];
+                    if (file) selectFile(repo.name, commit.hash, file.path);
+                }});
+                node.addEventListener('keydown', (evt) => {{
+                    if (evt.key === 'Enter' || evt.key === ' ') {{
+                        evt.preventDefault();
+                        const idx = Number(node.getAttribute('data-file-index'));
+                        const file = files[idx];
+                        if (file) selectFile(repo.name, commit.hash, file.path);
+                    }}
+                }});
+            }});
         }}
 
         function setupAutoRefresh() {{
@@ -858,6 +1030,9 @@ def main() -> int:
     parser.add_argument("--graph-limit", type=int, default=25, help="Max graph lines per repo in HTML")
     parser.add_argument("--commit-limit", type=int, default=8, help="Max recent commits per repo in HTML")
     parser.add_argument("--commit-files-limit", type=int, default=12, help="Max changed files shown per commit")
+    parser.add_argument("--diff-unified", type=int, default=3, help="Context lines per file diff")
+    parser.add_argument("--diff-max-lines", type=int, default=160, help="Max diff lines per file shown in HTML")
+    parser.add_argument("--diff-max-chars", type=int, default=7000, help="Max diff chars per file shown in HTML")
     parser.add_argument("--auto-refresh-sec", type=int, default=0, help="Default HTML auto-refresh in seconds (0 disables)")
     parser.add_argument("--output", default="dashboard/global-git-dashboard.md", help="Markdown output file")
     parser.add_argument(
@@ -882,6 +1057,9 @@ def main() -> int:
             graph_limit=args.graph_limit,
             commit_limit=args.commit_limit,
             commit_files_limit=args.commit_files_limit,
+            diff_unified=args.diff_unified,
+            diff_max_lines=args.diff_max_lines,
+            diff_max_chars=args.diff_max_chars,
         )
         for repo in repos
     ]
