@@ -17,7 +17,7 @@ from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-IGNORED_DIRS = {"node_modules", "vendor", ".venv", "dist", "build"}
+IGNORED_DIRS = {"node_modules", "vendor", ".venv", "venv", "dist", "build", "_recovery", "__pycache__"}
 STALE_DAYS = 90
 SECRET_PATTERNS = [
     re.compile(r"ATATT[A-Za-z0-9_-]{10,}"),
@@ -427,6 +427,8 @@ def render_html_dashboard(
     stale = len([r for r in repos if r.is_stale])
 
     rows_json = json.dumps([to_row(r) for r in repos], ensure_ascii=False)
+    # Evitar que </script> dentro del JSON cierre prematuramente el bloque <script>
+    rows_json = rows_json.replace("</script>", r"<\/script>").replace("<!--", r"<\!--")
     root_text = escape(str(root))
     default_refresh = max(auto_refresh_sec, 0)
 
